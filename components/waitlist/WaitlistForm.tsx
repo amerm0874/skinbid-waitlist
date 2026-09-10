@@ -101,7 +101,7 @@ export default function WaitlistForm({
           name: trimmedName,
           email: trimmedEmail,
           social: trimmedSocial,
-          company: honeypot,
+          hp: honeypot,
           from: role,
           fields,
         }),
@@ -180,9 +180,9 @@ export default function WaitlistForm({
 
         <div className="absolute -left-[9999px] h-0 w-0 overflow-hidden" aria-hidden="true">
           <label>
-            Company
+            Fax
             <input
-              name="company"
+              name="skinbid_hp"
               tabIndex={-1}
               autoComplete="off"
               value={honeypot}

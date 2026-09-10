@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { appendLocalWaitlist } from "@/lib/waitlist-local";
 import {
@@ -14,6 +15,7 @@ type Body = {
   name?: string;
   email?: string;
   social?: string;
+  hp?: string;
   company?: string;
   from?: string;
   fields?: Record<string, string>;
@@ -35,6 +37,100 @@ function saveFailed() {
   return NextResponse.json({ error: SAVE_ERROR }, { status: 500 });
 }
 
+function saved() {
+  return NextResponse.json({ ok: true, stored: "supabase" });
+}
+
+async function findWaitlistId(supabase: SupabaseClient, email: string) {
+  const { data, error } = await supabase
+    .from("waitlist")
+    .select("id")
+    .eq("email", email)
+    .limit(1);
+  if (error) {
+    console.log("Waitlist lookup failed", error.message);
+    return null;
+  }
+  return data?.[0]?.id ?? null;
+}
+
+async function writeWaitlist(
+  supabase: SupabaseClient,
+  row: {
+    email: string;
+    name: string;
+    social: string;
+    from: Role;
+    fields: Record<string, string>;
+  },
+) {
+  const existingId = await findWaitlistId(supabase, row.email);
+  const updates: Record<string, unknown>[] = [
+    {
+      name: row.name,
+      instagram: row.social,
+      role: row.from,
+      fields: row.fields,
+    },
+    {
+      name: row.name,
+      social: row.social,
+      role: row.from,
+      fields: row.fields,
+    },
+  ];
+
+  if (existingId) {
+    for (const update of updates) {
+      const { error } = await supabase
+        .from("waitlist")
+        .update(update)
+        .eq("id", existingId);
+      if (!error) {
+        console.log("Waitlist updated in Supabase");
+        return true;
+      }
+      console.log("Waitlist update failed", error.message);
+    }
+    return true;
+  }
+
+  const inserts: Record<string, unknown>[] = [
+    {
+      email: row.email,
+      name: row.name,
+      instagram: row.social,
+      role: row.from,
+      fields: row.fields,
+    },
+    {
+      email: row.email,
+      name: row.name,
+      social: row.social,
+      role: row.from,
+      fields: row.fields,
+    },
+    { email: row.email, role: row.from, fields: row.fields },
+    { email: row.email, role: row.from, extra: row.social },
+    { email: row.email, role: row.from },
+  ];
+
+  for (const attempt of inserts) {
+    const { error } = await supabase.from("waitlist").insert(attempt);
+    if (!error) {
+      console.log("Waitlist saved to Supabase");
+      return true;
+    }
+    const message = error.message || "";
+    console.log("Waitlist insert failed", message);
+    if (/duplicate|unique/i.test(message)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function POST(request: Request) {
   let body: Body;
   try {
@@ -47,8 +143,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Try again later." }, { status: 429 });
   }
 
-  // Bots fill the hidden "company" box. Pretend it worked so they leave.
-  if ((body.company ?? "").trim()) {
+  // Bots fill the hidden trap box. Pretend it worked so they leave.
+  if ((body.hp ?? body.company ?? "").trim()) {
     return NextResponse.json({ ok: true });
   }
 
@@ -82,44 +178,32 @@ export async function POST(request: Request) {
     from,
   };
 
-  const supabase = createAdminSupabase() ?? createPublicSupabase();
+  const admin = createAdminSupabase();
+  const supabase = admin ?? createPublicSupabase();
+  console.log("Waitlist client", admin ? "admin" : supabase ? "public" : "none");
+
   if (supabase) {
     try {
-      const { data: existing, error: findError } = await supabase
-        .from("waitlist")
-        .select("id")
-        .eq("email", email)
-        .limit(1);
-      if (!findError && existing && existing.length > 0) {
-        console.log("Waitlist email already stored");
-        return NextResponse.json({ ok: true, stored: "supabase" });
-      }
-
-      // Live table uses instagram + required role. Keep older column names as backups.
-      const attempts: Record<string, unknown>[] = [
-        { email, name, instagram: social, role: from, fields },
-        { email, name, social, role: from, fields },
-        { email, role: from, fields },
-        { email, role: from, extra: social },
-        { email, role: from },
-      ];
-      for (const attempt of attempts) {
-        const { error } = await supabase.from("waitlist").insert(attempt);
-        if (!error) {
-          console.log("Waitlist saved to Supabase");
-          return NextResponse.json({ ok: true, stored: "supabase" });
+      const wrote = await writeWaitlist(supabase, {
+        email,
+        name,
+        social,
+        from,
+        fields,
+      });
+      if (wrote) {
+        if (admin) {
+          const storedId = await findWaitlistId(admin, email);
+          if (!storedId) {
+            console.log("Waitlist write reported ok but row is missing");
+            return saveFailed();
+          }
         }
-        const message = error.message || "";
-        console.log("Waitlist insert failed", message);
-        if (/duplicate|unique/i.test(message)) {
-          return NextResponse.json({ ok: true, stored: "supabase" });
-        }
+        return saved();
       }
     } catch (error) {
       console.log("Waitlist supabase threw", error);
     }
-  } else {
-    console.log("Waitlist missing supabase client");
   }
 
   if (process.env.VERCEL) {

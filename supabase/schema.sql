@@ -28,6 +28,17 @@ alter table public.waitlist alter column role set default 'athlete';
 
 alter table public.waitlist enable row level security;
 
+-- Keep the newest row per email, then lock the table to one row each.
+delete from public.waitlist as older
+using public.waitlist as newer
+where older.email = newer.email
+  and (
+    older.created_at < newer.created_at
+    or (older.created_at = newer.created_at and older.id < newer.id)
+  );
+
+create unique index if not exists waitlist_email_idx on public.waitlist (email);
+
 grant insert on table public.waitlist to anon, authenticated;
 
 drop policy if exists "waitlist_insert_public" on public.waitlist;
