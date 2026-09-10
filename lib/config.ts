@@ -5,7 +5,7 @@ export const SITE = {
   title: "SkinBid — Event-day body slots",
   description:
     "List logo slots on your body for any event. Brands pay SkinBid. You wear a temp tattoo for one day. You get paid after we check the photos.",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://skinbid.com",
+  url: process.env.NEXT_PUBLIC_SITE_URL || "https://www.skinbid.me",
   email: "skinbidme@gmail.com",
   ogHeadline: "Your next race already has ad space.",
 };

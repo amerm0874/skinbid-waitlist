@@ -6,12 +6,15 @@ type ModelViewerJSXAttributes = Partial<
 > & {
   src?: string;
   alt?: string;
+  poster?: string;
+  reveal?: "auto" | "interaction" | "manual";
   "camera-controls"?: boolean;
   "touch-action"?: string;
   "auto-rotate"?: boolean;
   "auto-rotate-delay"?: string | number;
   "rotation-per-second"?: string;
   "shadow-intensity"?: string | number;
+  "shadow-softness"?: string | number;
   exposure?: string | number;
   "environment-image"?: string;
   "disable-pan"?: boolean;
