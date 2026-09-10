@@ -7,9 +7,25 @@ import { trackWaitlistSubmit } from "@/lib/plausible";
 import type { Role } from "@/lib/config";
 
 const SUCCESS = "You’re on the list. We’ll email you when we open.";
+const SAVE_ERROR = "Could not save. Try again.";
 
 function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+async function errorFromResponse(response: Response) {
+  try {
+    const payload = (await response.json()) as { error?: string };
+    if (response.status === 429) {
+      return "Try again later.";
+    }
+    if (response.status === 400 && payload.error) {
+      return payload.error;
+    }
+    return SAVE_ERROR;
+  } catch {
+    return SAVE_ERROR;
+  }
 }
 
 export default function WaitlistForm({
@@ -90,15 +106,14 @@ export default function WaitlistForm({
           fields,
         }),
       });
-      const payload = (await response.json()) as { error?: string; detail?: string };
       if (!response.ok) {
-        setErrorMessage(payload.error || "Try again.");
+        setErrorMessage(await errorFromResponse(response));
         return;
       }
       trackWaitlistSubmit(role);
       setDone(true);
     } catch {
-      setErrorMessage("Try again.");
+      setErrorMessage(SAVE_ERROR);
     } finally {
       setBusy(false);
     }

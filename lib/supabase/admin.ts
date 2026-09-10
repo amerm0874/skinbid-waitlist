@@ -40,11 +40,3 @@ export function createPublicSupabase() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
-
-export function waitlistDbStatus() {
-  return {
-    url: Boolean(supabaseUrl()),
-    anon: Boolean(supabaseAnonKey()),
-    service: Boolean(supabaseServiceKey()),
-  };
-}

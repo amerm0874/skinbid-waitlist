@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  createAdminSupabase,
-  createPublicSupabase,
-  waitlistDbStatus,
-} from "@/lib/supabase/admin";
+import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { appendLocalWaitlist } from "@/lib/waitlist-local";
 import {
   WAITLIST_RATE_LIMIT,
@@ -11,6 +7,8 @@ import {
   type Role,
 } from "@/lib/config";
 import { takeToken } from "@/lib/rate-limit";
+
+const SAVE_ERROR = "Could not save. Try again.";
 
 type Body = {
   name?: string;
@@ -33,16 +31,17 @@ function clientKey(request: Request) {
   return request.headers.get("x-real-ip") ?? "unknown";
 }
 
-export async function GET() {
-  const keys = waitlistDbStatus();
-  return NextResponse.json({
-    database: Boolean(createAdminSupabase() || createPublicSupabase()),
-    keys,
-  });
+function saveFailed() {
+  return NextResponse.json({ error: SAVE_ERROR }, { status: 500 });
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Body;
+  let body: Body;
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Try again." }, { status: 400 });
+  }
 
   if (!takeToken(clientKey(request), WAITLIST_RATE_LIMIT, WAITLIST_RATE_WINDOW_MS)) {
     return NextResponse.json({ error: "Try again later." }, { status: 429 });
@@ -83,20 +82,8 @@ export async function POST(request: Request) {
     from,
   };
 
-  const keys = waitlistDbStatus();
-  console.log("Waitlist keys", keys);
-
-  // Admin key first so we can save even if the public key name changed.
   const supabase = createAdminSupabase() ?? createPublicSupabase();
-  if (!supabase) {
-    console.log("Waitlist missing supabase client");
-    if (process.env.VERCEL) {
-      return NextResponse.json(
-        { error: "The live site is not connected to the database yet." },
-        { status: 503 },
-      );
-    }
-  } else {
+  if (supabase) {
     try {
       const { data: existing, error: findError } = await supabase
         .from("waitlist")
@@ -116,44 +103,34 @@ export async function POST(request: Request) {
         { email, role: from, extra: social },
         { email, role: from },
       ];
-      let lastError = "";
       for (const attempt of attempts) {
         const { error } = await supabase.from("waitlist").insert(attempt);
         if (!error) {
           console.log("Waitlist saved to Supabase");
           return NextResponse.json({ ok: true, stored: "supabase" });
         }
-        lastError = error.message || "";
-        console.log("Waitlist insert failed", lastError);
-        if (/duplicate|unique/i.test(lastError)) {
+        const message = error.message || "";
+        console.log("Waitlist insert failed", message);
+        if (/duplicate|unique/i.test(message)) {
           return NextResponse.json({ ok: true, stored: "supabase" });
         }
       }
-      if (process.env.VERCEL) {
-        return NextResponse.json(
-          { error: "Could not save. Try again.", detail: lastError },
-          { status: 500 },
-        );
-      }
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "unknown";
-      console.log("Waitlist supabase threw", detail);
-      if (process.env.VERCEL) {
-        return NextResponse.json(
-          { error: "Could not save. Try again.", detail },
-          { status: 500 },
-        );
-      }
+      console.log("Waitlist supabase threw", error);
     }
+  } else {
+    console.log("Waitlist missing supabase client");
+  }
+
+  if (process.env.VERCEL) {
+    return saveFailed();
   }
 
   try {
     await appendLocalWaitlist({ email, name, social, fields });
     return NextResponse.json({ ok: true, stored: "local" });
-  } catch {
-    return NextResponse.json(
-      { error: "Could not save. Try again." },
-      { status: 500 },
-    );
+  } catch (error) {
+    console.log("Waitlist local save failed", error);
+    return saveFailed();
   }
 }
