@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { createAdminSupabase } from "@/lib/supabase/admin";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { appendLocalWaitlist } from "@/lib/waitlist-local";
-import { hasPublicSupabase } from "@/lib/supabase/client";
 import {
   WAITLIST_RATE_LIMIT,
   WAITLIST_RATE_WINDOW_MS,
@@ -52,15 +50,10 @@ export async function POST(request: Request) {
       : body.from === "athlete" || body.fields?.from === "athlete"
         ? "athlete"
         : undefined;
-  const fields: Record<string, string> = {
-    ...(body.fields ?? {}),
-    name,
-    social,
-  };
-  if (from) {
-    fields.from = from;
-  }
 
+  if (!from) {
+    return NextResponse.json({ error: "Choose athlete or brand." }, { status: 400 });
+  }
   if (!name) {
     return NextResponse.json({ error: "Enter your name." }, { status: 400 });
   }
@@ -71,31 +64,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter Instagram or X." }, { status: 400 });
   }
 
-  const row = {
-    email,
+  const fields: Record<string, string> = {
+    ...(body.fields ?? {}),
     name,
     social,
-    fields,
-    ...(from ? { role: from } : {}),
+    from,
   };
 
-  if (hasPublicSupabase()) {
-    const admin = createAdminSupabase();
-    const supabase = admin ?? (await createServerSupabase());
-    if (supabase) {
-      const attempts = [
-        row,
-        { email, name, social, fields },
-        { email, fields, ...(from ? { role: from } : {}) },
-        { email, fields },
-      ];
-      for (const attempt of attempts) {
-        const { error } = await supabase.from("waitlist").insert(attempt);
-        if (!error) {
-          console.log("Waitlist saved to Supabase");
-          return NextResponse.json({ ok: true, stored: "supabase" });
-        }
-        console.log("Waitlist insert failed", error.message);
+  // Admin key first so we can save even if the public key name changed.
+  const supabase = createAdminSupabase() ?? createPublicSupabase();
+  if (supabase) {
+    const { data: existing } = await supabase
+      .from("waitlist")
+      .select("id")
+      .eq("email", email)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      console.log("Waitlist email already stored");
+      return NextResponse.json({ ok: true, stored: "supabase" });
+    }
+
+    // Live table uses instagram + required role. Keep older column names as backups.
+    const attempts = [
+      { email, name, instagram: social, role: from, fields },
+      { email, name, social, role: from, fields },
+      { email, role: from, fields },
+      { email, role: from, extra: social },
+    ];
+    for (const attempt of attempts) {
+      const { error } = await supabase.from("waitlist").insert(attempt);
+      if (!error) {
+        console.log("Waitlist saved to Supabase");
+        return NextResponse.json({ ok: true, stored: "supabase" });
+      }
+      const message = error.message || "";
+      console.log("Waitlist insert failed", message);
+      if (/duplicate|unique/i.test(message)) {
+        return NextResponse.json({ ok: true, stored: "supabase" });
       }
     }
   }

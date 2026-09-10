@@ -2,6 +2,7 @@
 
 import type { ModelViewerElement } from "@google/model-viewer";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -12,6 +13,11 @@ import EventHud from "@/components/landing/EventHud";
 import SlotPitchCard from "@/components/landing/SlotPitchCard";
 import WaitlistModal from "@/components/waitlist/WaitlistModal";
 import { DEMO_ATHLETES, SLOT_LABELS, type Gender, type SlotId } from "@/lib/demo-landing";
+import {
+  DRACO_PATH,
+  MODEL_SRC,
+  POSTER_SRC,
+} from "@/lib/landing-media";
 
 type SlotRow = {
   id: SlotId;
@@ -23,33 +29,31 @@ type BodyFrame = {
   center: { x: number; y: number; z: number };
 };
 
-const MODEL_SRC: Record<Gender, string> = {
-  male: "/avatar-male.glb?v=9",
-  female: "/avatar-female.glb?v=9",
-};
-
 type ModelViewerCtor = typeof ModelViewerElement & {
   dracoDecoderLocation: string;
 };
 
+let modelViewerPromise: Promise<ModelViewerCtor> | null = null;
+
 // Start the 3D library now, not after the first paint. Point Draco at our
 // local decoder so the page does not wait on Google's CDN.
 function ensureModelViewer() {
-  return import("@google/model-viewer").then((mod) => {
-    const El = mod.ModelViewerElement as ModelViewerCtor;
-    El.dracoDecoderLocation = "/draco/";
-    return El;
-  });
+  if (!modelViewerPromise) {
+    modelViewerPromise = import(
+      /* webpackPreload: true */
+      "@google/model-viewer"
+    ).then((mod) => {
+      const El = mod.ModelViewerElement as ModelViewerCtor;
+      El.dracoDecoderLocation = DRACO_PATH;
+      return El;
+    });
+  }
+  return modelViewerPromise;
 }
 
 if (typeof window !== "undefined") {
   void ensureModelViewer();
 }
-
-const POSTER_SRC: Record<Gender, string> = {
-  male: "/poster-male.png",
-  female: "/poster-female.png",
-};
 
 const TARGET_HEIGHT_M = 1.7;
 const STUDIO = "#111111";
@@ -130,16 +134,31 @@ function poseToTarget(pose: OrbitPose) {
 }
 
 function applyPose(viewer: ModelViewerElement, pose: OrbitPose) {
+  if (!viewer.isConnected) {
+    return;
+  }
   viewer.cameraOrbit = poseToOrbit(pose);
   viewer.cameraTarget = poseToTarget(pose);
   viewer.jumpCameraToGoal();
 }
 
 function lockOrbit(viewer: ModelViewerElement, pose: OrbitPose) {
+  if (!viewer.isConnected) {
+    return;
+  }
   const orbit = poseToOrbit(pose);
   viewer.minCameraOrbit = orbit;
   viewer.maxCameraOrbit = orbit;
   applyPose(viewer, pose);
+}
+
+function stopViewer(viewer: ModelViewerElement) {
+  try {
+    viewer.pause();
+    viewer.src = "";
+  } catch {
+    // The 3D tag is already gone.
+  }
 }
 
 function slotWorld(slot: (typeof SLOTS)[number], frame: BodyFrame) {
@@ -188,7 +207,7 @@ function nearestSlot(
 }
 
 export default function BodyViewerSection() {
-  const viewerRef = useRef<ModelViewerElement>(null);
+  const viewerRef = useRef<ModelViewerElement | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const bodyFrameRef = useRef<BodyFrame>({
     size: { x: 0.55, y: 1.7, z: 0.28 },
@@ -198,7 +217,6 @@ export default function BodyViewerSection() {
   const pointerRef = useRef({ x: 0, y: 0, dragged: false, down: false });
   const activeSlotRef = useRef<SlotId | undefined>(undefined);
   const spinRef = useRef(false);
-  const [ready, setReady] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [selected, setSelected] = useState<Gender>("male");
   const [spin, setSpin] = useState(false);
@@ -220,10 +238,21 @@ export default function BodyViewerSection() {
   const lockedTarget = lockedPose ? poseToTarget(lockedPose) : undefined;
 
   function freezeViewer(viewer: ModelViewerElement) {
+    if (!viewer.isConnected) {
+      return;
+    }
     viewer.autoRotate = false;
     viewer.cameraControls = false;
     viewer.interactionPrompt = "none";
   }
+
+  const bindViewer = useCallback((node: ModelViewerElement | null) => {
+    const previous = viewerRef.current;
+    if (previous && previous !== node) {
+      stopViewer(previous);
+    }
+    viewerRef.current = node;
+  }, []);
 
   function showSlotOnBody(slot: SlotId) {
     const viewer = viewerRef.current;
@@ -275,10 +304,6 @@ export default function BodyViewerSection() {
     setSelected(next);
   }
 
-  useEffect(() => {
-    void ensureModelViewer().then(() => setReady(true));
-  }, []);
-
   // Escape closes whichever panel is open. The waitlist popup handles Escape itself.
   useEffect(() => {
     if (waitlistOpen || (!activeSlot && !slotsOpen)) {
@@ -318,6 +343,21 @@ export default function BodyViewerSection() {
   }, [activeSlot, modelLoaded, bodyFrame]);
 
   useEffect(() => {
+    function swallowLeftover3D(event: PromiseRejectionEvent) {
+      const message = String((event.reason as Error)?.message ?? "");
+      if (message.includes("reading 'add'")) {
+        event.preventDefault();
+      }
+    }
+    window.addEventListener("unhandledrejection", swallowLeftover3D);
+    return () => {
+      window.setTimeout(() => {
+        window.removeEventListener("unhandledrejection", swallowLeftover3D);
+      }, 2500);
+    };
+  }, []);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     function syncSpin() {
       setSpin(!media.matches);
@@ -328,47 +368,54 @@ export default function BodyViewerSection() {
   }, []);
 
   useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) {
-      return;
-    }
-
     let cancelled = false;
-    let ran = false;
+    let viewer: ModelViewerElement | null = null;
+    let loadCount = 0;
 
     const handleLoad = async () => {
-      if (ran || cancelled) {
+      const current = viewerRef.current;
+      if (cancelled || !current || !current.isConnected) {
         return;
       }
-      ran = true;
+      const thisLoad = ++loadCount;
       try {
-        await frameLoadedBody(viewer);
-      } catch {
+        await frameLoadedBody(current);
+      } catch (error) {
+        console.log("Could not frame body", error);
         return;
       }
-      if (!cancelled) {
-        setModelLoaded(true);
+      if (cancelled || thisLoad !== loadCount || !current.isConnected) {
+        return;
+      }
+      setModelLoaded(true);
+      // Male is on screen first. Warm the other body in the background.
+      if (selected === "male") {
+        void fetch(MODEL_SRC.female, { credentials: "omit" });
       }
     };
 
-    async function frameLoadedBody(viewer: ModelViewerElement) {
-      const dimsNow = viewer.getDimensions();
-      const scaleNow = parseFloat((viewer.scale || "1 1 1").split(" ")[0]) || 1;
+    function handleError() {
+      console.log("Body viewer failed to load");
+    }
+
+    async function frameLoadedBody(loadedViewer: ModelViewerElement) {
+      const dimsNow = loadedViewer.getDimensions();
+      const scaleNow = parseFloat((loadedViewer.scale || "1 1 1").split(" ")[0]) || 1;
       const factor = dimsNow.y > 0 ? TARGET_HEIGHT_M / dimsNow.y : 1;
       const nextScale = scaleNow * factor;
-      if (!viewer.isConnected) {
+      if (!loadedViewer.isConnected) {
         return;
       }
-      viewer.scale = `${nextScale} ${nextScale} ${nextScale}`;
+      loadedViewer.scale = `${nextScale} ${nextScale} ${nextScale}`;
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       });
-      if (cancelled || !viewer.isConnected) {
+      if (cancelled || !loadedViewer.isConnected) {
         return;
       }
 
-      const size = viewer.getDimensions();
-      const center = viewer.getBoundingBoxCenter();
+      const size = loadedViewer.getDimensions();
+      const center = loadedViewer.getBoundingBoxCenter();
       const scaledFrame: BodyFrame = {
         size: { x: size.x, y: size.y, z: size.z },
         center: { x: center.x, y: center.y, z: center.z },
@@ -387,21 +434,21 @@ export default function BodyViewerSection() {
         },
       };
 
-      viewer.shadowIntensity = 0.85;
-      viewer.shadowSoftness = 1;
-      viewer.interpolationDecay = 1;
-      freezeViewer(viewer);
+      loadedViewer.shadowIntensity = 0.85;
+      loadedViewer.shadowSoftness = 1;
+      loadedViewer.interpolationDecay = 1;
+      freezeViewer(loadedViewer);
       const slot = activeSlotRef.current;
       if (slot) {
-        lockOrbit(viewer, slotCameraPose(slot, scaledFrame));
+        lockOrbit(loadedViewer, slotCameraPose(slot, scaledFrame));
       } else {
         const pose = homePose(scaledFrame);
-        viewer.minCameraOrbit = IDLE_ORBIT_MIN;
-        viewer.maxCameraOrbit = IDLE_ORBIT_MAX;
-        applyPose(viewer, pose);
-        viewer.cameraControls = true;
-        viewer.interactionPrompt = "auto";
-        viewer.autoRotate = spinRef.current;
+        loadedViewer.minCameraOrbit = IDLE_ORBIT_MIN;
+        loadedViewer.maxCameraOrbit = IDLE_ORBIT_MAX;
+        applyPose(loadedViewer, pose);
+        loadedViewer.cameraControls = true;
+        loadedViewer.interactionPrompt = "auto";
+        loadedViewer.autoRotate = spinRef.current;
       }
       bodyFrameRef.current = frame;
       scaledFrameRef.current = scaledFrame;
@@ -409,15 +456,26 @@ export default function BodyViewerSection() {
       console.log("BodyViewer loaded", selected, "frame", frame);
     }
 
-    viewer.addEventListener("load", handleLoad);
-    if (viewer.loaded) {
-      void handleLoad();
-    }
+    void ensureModelViewer().then(() => {
+      if (cancelled) {
+        return;
+      }
+      viewer = viewerRef.current;
+      if (!viewer) {
+        return;
+      }
+      viewer.addEventListener("load", handleLoad);
+      viewer.addEventListener("error", handleError);
+      if (viewer.loaded) {
+        void handleLoad();
+      }
+    });
     return () => {
       cancelled = true;
-      viewer.removeEventListener("load", handleLoad);
+      viewer?.removeEventListener("load", handleLoad);
+      viewer?.removeEventListener("error", handleError);
     };
-  }, [ready, selected]);
+  }, [selected]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -434,7 +492,7 @@ export default function BodyViewerSection() {
     return () => {
       frame.removeEventListener("wheel", blockWheelZoom, { capture: true });
     };
-  }, [ready]);
+  }, []);
 
   function slotAtPoint(clientX: number, clientY: number) {
     const viewer = viewerRef.current;
@@ -548,59 +606,59 @@ export default function BodyViewerSection() {
               <img
                 src={POSTER_SRC[selected]}
                 alt=""
+                width={1280}
+                height={675}
+                decoding="async"
                 className="body-viewer-poster"
               />
               <p className="body-viewer-wait">Loading 3D…</p>
             </>
           )}
 
-          {ready ? (
-            <model-viewer
-              key={selected}
-              ref={viewerRef}
-              src={MODEL_SRC[selected]}
-              poster={POSTER_SRC[selected]}
-              loading="eager"
-              reveal="auto"
-              camera-controls={cameraIdle}
-              disable-zoom
-              field-of-view="34deg"
-              min-field-of-view="30deg"
-              max-field-of-view="40deg"
-              touch-action="none"
-              shadow-intensity="0.85"
-              shadow-softness="1"
-              exposure="1.15"
-              environment-image="neutral"
-              disable-pan
-              camera-orbit={lockedOrbit}
-              camera-target={lockedTarget}
-              min-camera-orbit={lockedOrbit ?? IDLE_ORBIT_MIN}
-              max-camera-orbit={lockedOrbit ?? IDLE_ORBIT_MAX}
-              interpolation-decay="1"
-              interaction-prompt={cameraIdle ? "auto" : "none"}
-              auto-rotate={spin && cameraIdle}
-              auto-rotate-delay="0"
-              rotation-per-second="22deg"
-              onPointerDown={onBodyPointerDown}
-              onPointerMove={onBodyPointerMove}
-              onPointerUp={onBodyPointerUp}
-              onPointerLeave={onBodyPointerLeave}
-              className={
-                overSlot && !waitlistOpen ? "is-over-slot" : undefined
-              }
-              style={{
-                backgroundColor: STUDIO,
-                cursor: waitlistOpen
-                  ? "default"
-                  : overSlot
-                    ? "pointer"
-                    : cameraIdle
-                      ? "grab"
-                      : "default",
-              }}
-            />
-          ) : null}
+          <model-viewer
+            ref={bindViewer}
+            src={MODEL_SRC[selected]}
+            poster={POSTER_SRC[selected]}
+            loading="eager"
+            reveal="auto"
+            camera-controls={cameraIdle}
+            disable-zoom
+            field-of-view="34deg"
+            min-field-of-view="30deg"
+            max-field-of-view="40deg"
+            touch-action="none"
+            shadow-intensity="0.85"
+            shadow-softness="1"
+            exposure="1.15"
+            environment-image="neutral"
+            disable-pan
+            camera-orbit={lockedOrbit}
+            camera-target={lockedTarget}
+            min-camera-orbit={lockedOrbit ?? IDLE_ORBIT_MIN}
+            max-camera-orbit={lockedOrbit ?? IDLE_ORBIT_MAX}
+            interpolation-decay="1"
+            interaction-prompt={cameraIdle ? "auto" : "none"}
+            auto-rotate={spin && cameraIdle}
+            auto-rotate-delay="0"
+            rotation-per-second="22deg"
+            onPointerDown={onBodyPointerDown}
+            onPointerMove={onBodyPointerMove}
+            onPointerUp={onBodyPointerUp}
+            onPointerLeave={onBodyPointerLeave}
+            className={
+              overSlot && !waitlistOpen ? "is-over-slot" : undefined
+            }
+            style={{
+              backgroundColor: STUDIO,
+              cursor: waitlistOpen
+                ? "default"
+                : overSlot
+                  ? "pointer"
+                  : cameraIdle
+                    ? "grab"
+                    : "default",
+            }}
+          />
 
           {activeSlot ? (
             <SlotPitchCard
@@ -618,7 +676,6 @@ export default function BodyViewerSection() {
         open={waitlistOpen}
         onClose={() => setWaitlistOpen(false)}
         slot={activeSlot}
-        from="brand"
       />
     </section>
   );

@@ -110,7 +110,7 @@ export const DEMO_ATHLETES: Record<Gender, DemoAthlete> = {
     followers: "12.4k",
     visitorsBase: 18,
     watchedToday: 247,
-    photo: "/poster-male.png",
+    photo: "/poster-male.webp",
     bids: {
       "chest-left": { cents: 40000, brand: "Pulse" },
       "chest-right": { cents: 20000, brand: "Nomad" },
@@ -142,7 +142,7 @@ export const DEMO_ATHLETES: Record<Gender, DemoAthlete> = {
     followers: "8.1k",
     visitorsBase: 14,
     watchedToday: 186,
-    photo: "/poster-female.png",
+    photo: "/poster-female.webp",
     bids: {
       "shoulder-left": { cents: 20000, brand: "Pulse" },
       "biceps-left": { cents: 40000, brand: "Nomad" },

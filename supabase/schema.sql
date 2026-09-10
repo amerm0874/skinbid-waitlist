@@ -11,7 +11,9 @@ create table if not exists public.waitlist (
   email text not null,
   name text,
   social text,
-  role text check (role is null or role in ('athlete', 'brand')),
+  instagram text,
+  extra text,
+  role text default 'athlete' check (role is null or role in ('athlete', 'brand')),
   fields jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
@@ -19,9 +21,14 @@ create table if not exists public.waitlist (
 alter table public.waitlist add column if not exists fields jsonb not null default '{}'::jsonb;
 alter table public.waitlist add column if not exists name text;
 alter table public.waitlist add column if not exists social text;
+alter table public.waitlist add column if not exists instagram text;
+alter table public.waitlist add column if not exists extra text;
 alter table public.waitlist alter column role drop not null;
+alter table public.waitlist alter column role set default 'athlete';
 
 alter table public.waitlist enable row level security;
+
+grant insert on table public.waitlist to anon, authenticated;
 
 drop policy if exists "waitlist_insert_public" on public.waitlist;
 create policy "waitlist_insert_public"

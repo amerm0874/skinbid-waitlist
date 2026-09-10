@@ -7,6 +7,12 @@ import {
   LandingFooter,
   LandingNav,
 } from "@/components/landing/LandingChrome";
+import {
+  DRACO_WASM,
+  DRACO_WRAPPER,
+  HERO_SRC,
+  MODEL_SRC,
+} from "@/lib/landing-media";
 
 const STEPS = [
   {
@@ -34,15 +40,23 @@ const STEPS = [
 export default function LandingPage() {
   return (
     <div className="min-h-full bg-bg">
+      {/* Start the hero photo, 3D file, and Draco decoder before React boots. */}
+      <link rel="preload" href={HERO_SRC} as="image" />
       <link
         rel="preload"
-        href="/avatar-male.glb?v=9"
+        href={MODEL_SRC.male}
         as="fetch"
         crossOrigin="anonymous"
       />
       <link
         rel="preload"
-        href="/draco/draco_decoder.wasm"
+        href={DRACO_WASM}
+        as="fetch"
+        crossOrigin="anonymous"
+      />
+      <link
+        rel="preload"
+        href={DRACO_WRAPPER}
         as="fetch"
         crossOrigin="anonymous"
       />

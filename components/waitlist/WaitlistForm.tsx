@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { slotLabel } from "@/lib/demo-landing";
 import { trackWaitlistSubmit } from "@/lib/plausible";
@@ -21,6 +21,7 @@ export default function WaitlistForm({
   from?: Role;
   framed?: boolean;
 } = {}) {
+  const [role, setRole] = useState<Role | undefined>(from);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [social, setSocial] = useState("");
@@ -28,6 +29,13 @@ export default function WaitlistForm({
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [done, setDone] = useState(false);
+
+  // Landing links like /waitlist?from=athlete pre-select, but the person can still switch.
+  useEffect(() => {
+    if (from) {
+      setRole(from);
+    }
+  }, [from]);
 
   const shellClass = framed
     ? "form-shell mx-auto w-full max-w-md"
@@ -42,6 +50,10 @@ export default function WaitlistForm({
     const trimmedEmail = email.trim();
     const trimmedSocial = social.trim();
 
+    if (!role) {
+      setErrorMessage("Choose athlete or brand.");
+      return;
+    }
     if (!trimmedName) {
       setErrorMessage("Enter your name.");
       return;
@@ -60,12 +72,10 @@ export default function WaitlistForm({
       const fields: Record<string, string> = {
         name: trimmedName,
         social: trimmedSocial,
+        from: role,
       };
       if (slot) {
         fields.slot = slot;
-      }
-      if (from) {
-        fields.from = from;
       }
 
       const response = await fetch("/api/waitlist", {
@@ -76,7 +86,7 @@ export default function WaitlistForm({
           email: trimmedEmail,
           social: trimmedSocial,
           company: honeypot,
-          from,
+          from: role,
           fields,
         }),
       });
@@ -85,7 +95,7 @@ export default function WaitlistForm({
         setErrorMessage(payload.error || "Try again.");
         return;
       }
-      trackWaitlistSubmit(from);
+      trackWaitlistSubmit(role);
       setDone(true);
     } catch {
       setErrorMessage("Try again.");
@@ -114,6 +124,45 @@ export default function WaitlistForm({
           </p>
         ) : null}
 
+        <fieldset className="m-0 border-0 p-0">
+          <legend className="field-label w-full">I am</legend>
+          <div
+            className="seg w-full"
+            role="radiogroup"
+            aria-label="Athlete or brand"
+            aria-invalid={errorMessage.startsWith("Choose athlete") || undefined}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={role === "athlete"}
+              className={`flex-1 ${role === "athlete" ? "is-on" : ""}`}
+              onClick={() => {
+                setRole("athlete");
+                if (errorMessage.startsWith("Choose athlete")) {
+                  setErrorMessage("");
+                }
+              }}
+            >
+              Athlete
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={role === "brand"}
+              className={`flex-1 ${role === "brand" ? "is-on" : ""}`}
+              onClick={() => {
+                setRole("brand");
+                if (errorMessage.startsWith("Choose athlete")) {
+                  setErrorMessage("");
+                }
+              }}
+            >
+              Brand
+            </button>
+          </div>
+        </fieldset>
+
         <div className="absolute -left-[9999px] h-0 w-0 overflow-hidden" aria-hidden="true">
           <label>
             Company
@@ -127,7 +176,7 @@ export default function WaitlistForm({
           </label>
         </div>
 
-        <label className="block">
+        <label className="mt-4 block">
           <span className="field-label">Name</span>
           <input
             className="field"

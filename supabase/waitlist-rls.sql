@@ -1,7 +1,7 @@
 -- Paste this in Supabase: SQL Editor → New query → Run.
 -- It lets the website add a waitlist row. It does not let visitors read other emails.
 
-grant insert on table public.waitlist to anon;
+grant insert on table public.waitlist to anon, authenticated;
 
 drop policy if exists "anon can join waitlist" on public.waitlist;
 

@@ -33,7 +33,7 @@ export default async function WaitlistPage({
           Join the waitlist
         </h1>
         <p className="mt-3 max-w-md text-center text-[15px] text-muted">
-          Name, email, and a social. We email when we open.
+          Pick athlete or brand. We email when we open.
         </p>
         <div className="mt-10 w-full">
           <WaitlistForm slot={slot} from={from} />

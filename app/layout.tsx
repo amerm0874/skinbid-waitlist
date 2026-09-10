@@ -1,6 +1,7 @@
 import { Inter, Bebas_Neue, Chakra_Petch } from "next/font/google";
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { Analytics } from "@vercel/analytics/next";
 import { SITE } from "@/lib/config";
 import "./globals.css";
 
@@ -60,6 +61,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full bg-bg font-sans text-ink antialiased">
         {children}
+        {/* Counts visits after you deploy to Vercel. Does nothing in local dev. */}
+        <Analytics />
         {plausibleDomain ? (
           <Script
             defer
