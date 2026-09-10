@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
+import {
+  createAdminSupabase,
+  createPublicSupabase,
+  waitlistDbStatus,
+} from "@/lib/supabase/admin";
 import { appendLocalWaitlist } from "@/lib/waitlist-local";
 import {
   WAITLIST_RATE_LIMIT,
@@ -27,6 +31,14 @@ function clientKey(request: Request) {
     return forwarded.split(",")[0]?.trim() || "unknown";
   }
   return request.headers.get("x-real-ip") ?? "unknown";
+}
+
+export async function GET() {
+  const keys = waitlistDbStatus();
+  return NextResponse.json({
+    database: Boolean(createAdminSupabase() || createPublicSupabase()),
+    keys,
+  });
 }
 
 export async function POST(request: Request) {
@@ -71,46 +83,68 @@ export async function POST(request: Request) {
     from,
   };
 
+  const keys = waitlistDbStatus();
+  console.log("Waitlist keys", keys);
+
   // Admin key first so we can save even if the public key name changed.
   const supabase = createAdminSupabase() ?? createPublicSupabase();
-  if (supabase) {
-    const { data: existing } = await supabase
-      .from("waitlist")
-      .select("id")
-      .eq("email", email)
-      .limit(1);
-    if (existing && existing.length > 0) {
-      console.log("Waitlist email already stored");
-      return NextResponse.json({ ok: true, stored: "supabase" });
+  if (!supabase) {
+    console.log("Waitlist missing supabase client");
+    if (process.env.VERCEL) {
+      return NextResponse.json(
+        { error: "The live site is not connected to the database yet." },
+        { status: 503 },
+      );
     }
-
-    // Live table uses instagram + required role. Keep older column names as backups.
-    const attempts: Record<string, unknown>[] = [
-      { email, name, instagram: social, role: from, fields },
-      { email, name, social, role: from, fields },
-      { email, role: from, fields },
-      { email, role: from, extra: social },
-    ];
-    for (const attempt of attempts) {
-      const { error } = await supabase.from("waitlist").insert(attempt);
-      if (!error) {
-        console.log("Waitlist saved to Supabase");
+  } else {
+    try {
+      const { data: existing, error: findError } = await supabase
+        .from("waitlist")
+        .select("id")
+        .eq("email", email)
+        .limit(1);
+      if (!findError && existing && existing.length > 0) {
+        console.log("Waitlist email already stored");
         return NextResponse.json({ ok: true, stored: "supabase" });
       }
-      const message = error.message || "";
-      console.log("Waitlist insert failed", message);
-      if (/duplicate|unique/i.test(message)) {
-        return NextResponse.json({ ok: true, stored: "supabase" });
+
+      // Live table uses instagram + required role. Keep older column names as backups.
+      const attempts: Record<string, unknown>[] = [
+        { email, name, instagram: social, role: from, fields },
+        { email, name, social, role: from, fields },
+        { email, role: from, fields },
+        { email, role: from, extra: social },
+        { email, role: from },
+      ];
+      let lastError = "";
+      for (const attempt of attempts) {
+        const { error } = await supabase.from("waitlist").insert(attempt);
+        if (!error) {
+          console.log("Waitlist saved to Supabase");
+          return NextResponse.json({ ok: true, stored: "supabase" });
+        }
+        lastError = error.message || "";
+        console.log("Waitlist insert failed", lastError);
+        if (/duplicate|unique/i.test(lastError)) {
+          return NextResponse.json({ ok: true, stored: "supabase" });
+        }
+      }
+      if (process.env.VERCEL) {
+        return NextResponse.json(
+          { error: "Could not save. Try again.", detail: lastError },
+          { status: 500 },
+        );
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown";
+      console.log("Waitlist supabase threw", detail);
+      if (process.env.VERCEL) {
+        return NextResponse.json(
+          { error: "Could not save. Try again.", detail },
+          { status: 500 },
+        );
       }
     }
-  }
-
-  // On Vercel the disk is thrown away. Do not fake a save there.
-  if (process.env.VERCEL) {
-    return NextResponse.json(
-      { error: "Could not save. Try again." },
-      { status: 500 },
-    );
   }
 
   try {

@@ -90,7 +90,7 @@ export default function WaitlistForm({
           fields,
         }),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as { error?: string; detail?: string };
       if (!response.ok) {
         setErrorMessage(payload.error || "Try again.");
         return;
