@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     }
 
     // Live table uses instagram + required role. Keep older column names as backups.
-    const attempts = [
+    const attempts: Record<string, unknown>[] = [
       { email, name, instagram: social, role: from, fields },
       { email, name, social, role: from, fields },
       { email, role: from, fields },
