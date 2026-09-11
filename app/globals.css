@@ -338,6 +338,10 @@ button.press-btn {
   border-bottom-color: var(--accent);
 }
 
+select.field {
+  cursor: pointer;
+}
+
 textarea.field {
   height: auto;
   min-height: 88px;

@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { slotLabel } from "@/lib/demo-landing";
 import { trackWaitlistSubmit } from "@/lib/plausible";
-import type { Role } from "@/lib/config";
+import { ATHLETE_SPORTS, type Role } from "@/lib/config";
 
 const SUCCESS = "You’re on the list. We’ll email you when we open.";
 const SAVE_ERROR = "Could not save. Try again.";
@@ -38,6 +38,8 @@ export default function WaitlistForm({
   framed?: boolean;
 } = {}) {
   const [role, setRole] = useState<Role | undefined>(from);
+  const [sportChoice, setSportChoice] = useState("");
+  const [otherSport, setOtherSport] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [social, setSocial] = useState("");
@@ -65,9 +67,15 @@ export default function WaitlistForm({
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
     const trimmedSocial = social.trim();
+    const trimmedSport =
+      sportChoice === "Other" ? otherSport.trim() : sportChoice.trim();
 
     if (!role) {
       setErrorMessage("Choose athlete or brand.");
+      return;
+    }
+    if (role === "athlete" && !trimmedSport) {
+      setErrorMessage("Enter your sport.");
       return;
     }
     if (!trimmedName) {
@@ -93,6 +101,9 @@ export default function WaitlistForm({
       if (slot) {
         fields.slot = slot;
       }
+      if (role === "athlete") {
+        fields.sport = trimmedSport;
+      }
 
       const response = await fetch("/api/waitlist", {
         method: "POST",
@@ -101,6 +112,7 @@ export default function WaitlistForm({
           name: trimmedName,
           email: trimmedEmail,
           social: trimmedSocial,
+          sport: role === "athlete" ? trimmedSport : undefined,
           hp: honeypot,
           from: role,
           fields,
@@ -168,7 +180,10 @@ export default function WaitlistForm({
               className={`flex-1 ${role === "brand" ? "is-on" : ""}`}
               onClick={() => {
                 setRole("brand");
-                if (errorMessage.startsWith("Choose athlete")) {
+                if (
+                  errorMessage.startsWith("Choose athlete") ||
+                  errorMessage.includes("sport")
+                ) {
                   setErrorMessage("");
                 }
               }}
@@ -177,6 +192,51 @@ export default function WaitlistForm({
             </button>
           </div>
         </fieldset>
+
+        {role === "athlete" ? (
+          <>
+            <label className="mt-4 block">
+              <span className="field-label">Sport</span>
+              <select
+                className="field"
+                name="sport"
+                value={sportChoice}
+                onChange={(event) => {
+                  setSportChoice(event.target.value);
+                  if (errorMessage.includes("sport")) {
+                    setErrorMessage("");
+                  }
+                }}
+                aria-invalid={errorMessage.includes("sport") || undefined}
+              >
+                <option value="">Pick a sport…</option>
+                {ATHLETE_SPORTS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {sportChoice === "Other" ? (
+              <label className="mt-4 block">
+                <span className="field-label">Which sport?</span>
+                <input
+                  className="field"
+                  name="other_sport"
+                  value={otherSport}
+                  onChange={(event) => {
+                    setOtherSport(event.target.value);
+                    if (errorMessage.includes("sport")) {
+                      setErrorMessage("");
+                    }
+                  }}
+                  placeholder="Your sport…"
+                  aria-invalid={errorMessage.includes("sport") || undefined}
+                />
+              </label>
+            ) : null}
+          </>
+        ) : null}
 
         <div className="absolute -left-[9999px] h-0 w-0 overflow-hidden" aria-hidden="true">
           <label>

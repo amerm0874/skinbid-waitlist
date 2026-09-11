@@ -44,3 +44,16 @@ export const BRAND_CATEGORIES = [
   "other",
 ] as const;
 export type BrandCategory = (typeof BRAND_CATEGORIES)[number];
+
+// Waitlist athletes pick one. Other opens a text box.
+export const ATHLETE_SPORTS = [
+  "HYROX",
+  "CrossFit",
+  "Running",
+  "Marathon",
+  "Cycling",
+  "Triathlon",
+  "OCR",
+  "Other",
+] as const;
+export type AthleteSport = (typeof ATHLETE_SPORTS)[number];

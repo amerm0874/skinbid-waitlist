@@ -1,4 +1,10 @@
 -- Paste this in Supabase: SQL Editor → New query → Run.
+-- First query: see every saved email. Do not use Authentication → Users.
+
+select email, name, role, instagram, fields, created_at
+from public.waitlist
+order by created_at desc;
+
 -- It lets the website add a waitlist row. It does not let visitors read other emails.
 
 grant insert on table public.waitlist to anon, authenticated;

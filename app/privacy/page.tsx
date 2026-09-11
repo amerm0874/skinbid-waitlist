@@ -31,6 +31,7 @@ export default function PrivacyPage() {
             <li>Your name</li>
             <li>Your email</li>
             <li>A public social handle</li>
+            <li>Your sport, if you joined as an athlete</li>
             <li>The body slot you clicked, if you joined from the 3D figure</li>
           </ul>
           <p>

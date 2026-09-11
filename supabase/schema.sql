@@ -23,6 +23,7 @@ alter table public.waitlist add column if not exists name text;
 alter table public.waitlist add column if not exists social text;
 alter table public.waitlist add column if not exists instagram text;
 alter table public.waitlist add column if not exists extra text;
+alter table public.waitlist add column if not exists sport text;
 alter table public.waitlist alter column role drop not null;
 alter table public.waitlist alter column role set default 'athlete';
 

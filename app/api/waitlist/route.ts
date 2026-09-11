@@ -15,6 +15,7 @@ type Body = {
   name?: string;
   email?: string;
   social?: string;
+  sport?: string;
   hp?: string;
   company?: string;
   from?: string;
@@ -151,6 +152,7 @@ export async function POST(request: Request) {
   const name = (body.name ?? body.fields?.name ?? "").trim();
   const email = (body.email ?? "").trim().toLowerCase();
   const social = (body.social ?? body.fields?.social ?? "").trim();
+  const sport = (body.sport ?? body.fields?.sport ?? "").trim();
   const from: Role | undefined =
     body.from === "brand" || body.fields?.from === "brand"
       ? "brand"
@@ -160,6 +162,9 @@ export async function POST(request: Request) {
 
   if (!from) {
     return NextResponse.json({ error: "Choose athlete or brand." }, { status: 400 });
+  }
+  if (from === "athlete" && !sport) {
+    return NextResponse.json({ error: "Enter your sport." }, { status: 400 });
   }
   if (!name) {
     return NextResponse.json({ error: "Enter your name." }, { status: 400 });
@@ -177,6 +182,9 @@ export async function POST(request: Request) {
     social,
     from,
   };
+  if (from === "athlete") {
+    fields.sport = sport;
+  }
 
   const admin = createAdminSupabase();
   const supabase = admin ?? createPublicSupabase();
