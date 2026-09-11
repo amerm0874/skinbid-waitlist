@@ -250,6 +250,40 @@ button {
   color: var(--text);
 }
 
+/* Marc Lou credit: black face, lime offset plate, centered. */
+.credit-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 40px;
+}
+
+.credit-btn {
+  color: var(--accent);
+}
+
+.credit-btn .press-btn-plate {
+  background: var(--accent);
+}
+
+.credit-btn .press-btn-face {
+  height: auto;
+  min-height: 56px;
+  gap: 12px;
+  padding: 8px 22px 8px 8px;
+  background: #000;
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.credit-btn-photo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #000;
+}
+
 .press-btn:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 3px;

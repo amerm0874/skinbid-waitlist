@@ -14,6 +14,9 @@ import {
   MODEL_SRC,
 } from "@/lib/landing-media";
 
+const MARC_LOU_POST =
+  "https://x.com/marclou/status/2097326512169222407?s=20";
+
 const STEPS = [
   {
     n: "01",
@@ -105,6 +108,26 @@ export default function LandingPage() {
               </li>
             ))}
           </ol>
+          <div className="credit-row">
+            <a
+              href={MARC_LOU_POST}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="press-btn credit-btn"
+            >
+              <span className="press-btn-plate" aria-hidden="true" />
+              <span className="press-btn-face">
+                <img
+                  src="/landing/marclou.jpg"
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="credit-btn-photo"
+                />
+                Inspired by Marc Lou&apos;s post
+              </span>
+            </a>
+          </div>
         </div>
       </section>
 
