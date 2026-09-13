@@ -155,7 +155,7 @@ async function loadAthleteRows(
       .select(columns)
       .eq("role", "athlete");
     if (!result.error) {
-      return (result.data ?? []) as AthleteProfileRow[];
+      return (result.data ?? []) as unknown as AthleteProfileRow[];
     }
   }
   return [];
