@@ -210,7 +210,7 @@ export default function EventHud({
             </div>
           ) : null}
 
-          <Link className="hud-athlete" href="/waitlist">
+          <Link className="hud-athlete" href="/e/demo">
             <span className="hud-avatar">
               <img src={athlete.photo} alt="" />
             </span>

@@ -16,7 +16,7 @@ export function LandingNav() {
     <header className="site-header">
       <Wordmark />
       <nav className="nav-links">
-        <Link href="/waitlist">Join waitlist</Link>
+        <Link href="/login">Log in</Link>
       </nav>
     </header>
   );

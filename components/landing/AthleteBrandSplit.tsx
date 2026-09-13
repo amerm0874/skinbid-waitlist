@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-// Two short columns so each side sees their deal. Both go to /waitlist.
+// Two short columns so each side sees their deal, each to its own signup role.
 
 export default function AthleteBrandSplit() {
   return (
@@ -12,7 +12,7 @@ export default function AthleteBrandSplit() {
             List a dated event. Brands bid on zones. You wear a temp tattoo for
             one day. You get paid after we check the photos.
           </p>
-          <Link href="/waitlist?from=athlete" className="press-btn mt-6">
+          <Link href="/signup?role=athlete" className="press-btn mt-6">
             <span className="press-btn-plate" aria-hidden="true" />
             <span className="press-btn-face">Join as athlete</span>
           </Link>
@@ -23,7 +23,7 @@ export default function AthleteBrandSplit() {
             Pick a zone. Bid from $100. Money sits with SkinBid until proof.
             You get the race-day photo.
           </p>
-          <Link href="/waitlist?from=brand" className="press-btn mt-6">
+          <Link href="/signup?role=brand" className="press-btn mt-6">
             <span className="press-btn-plate" aria-hidden="true" />
             <span className="press-btn-face">Join as brand</span>
           </Link>

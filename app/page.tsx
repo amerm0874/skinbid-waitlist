@@ -76,9 +76,9 @@ export default function LandingPage() {
               tattoo for one day.
             </p>
             <div className="mt-6">
-              <a href="/waitlist?from=athlete" className="press-btn">
+              <a href="/signup?role=athlete" className="press-btn">
                 <span className="press-btn-plate" aria-hidden="true" />
-                <span className="press-btn-face">Join waitlist</span>
+                <span className="press-btn-face">Get started</span>
               </a>
             </div>
           </div>
