@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function ContactPage() {
   return (
     <SiteShell>
-      <article className="site-wrap max-w-2xl py-12 md:py-16">
+      <article className="site-wrap max-w-2xl py-[var(--block-y)]">
         <h1 className="display text-[40px] md:text-[56px]">Contact</h1>
         <p className="mt-4 max-w-md text-[15px] leading-6 text-muted">
           One inbox. Athletes, brands, press, and privacy requests all go

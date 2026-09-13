@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
-import SiteShell from "@/components/landing/SiteShell";
+import { getSessionUser } from "@/lib/auth";
+import { NO_OG_METADATA } from "@/lib/seo";
 import WaitlistForm from "@/components/waitlist/WaitlistForm";
+import { ProductShell } from "@/components/product/ProductShell";
 import type { Role } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "Waitlist",
-  description: "Request early access to SkinBid.",
+  description: "Email when events open.",
+  ...NO_OG_METADATA,
 };
 
 function firstParam(value: string | string[] | undefined) {
@@ -25,20 +28,19 @@ export default async function WaitlistPage({
   const fromParam = firstParam(params.from);
   const from: Role | undefined =
     fromParam === "brand" ? "brand" : fromParam === "athlete" ? "athlete" : undefined;
+  const { user, profile } = await getSessionUser();
 
   return (
-    <SiteShell>
-      <main className="site-wrap flex flex-col items-center py-12 md:py-16">
-        <h1 className="display text-center text-[40px] md:text-[56px]">
-          Join the waitlist
-        </h1>
-        <p className="mt-3 max-w-md text-center text-[15px] text-muted">
-          Pick athlete or brand. Athletes add a sport. We email when we open.
-        </p>
-        <div className="mt-10 w-full">
-          <WaitlistForm slot={slot} from={from} />
+    <ProductShell email={user?.email} role={profile?.role}>
+      <div className="page-stack">
+        <div>
+          <h1 className="display page-title">Waitlist</h1>
+          <p className="page-lead">
+            Pick athlete or brand. We email you when events open.
+          </p>
         </div>
-      </main>
-    </SiteShell>
+        <WaitlistForm slot={slot} from={from} />
+      </div>
+    </ProductShell>
   );
 }

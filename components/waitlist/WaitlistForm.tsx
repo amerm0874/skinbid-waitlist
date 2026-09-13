@@ -6,7 +6,8 @@ import { slotLabel } from "@/lib/demo-landing";
 import { trackWaitlistSubmit } from "@/lib/plausible";
 import type { Role } from "@/lib/config";
 
-const SUCCESS = "You’re on the list. We’ll email you when we open.";
+const SUCCESS =
+  "You’re on the list. First events open when we have enough athletes.";
 const SAVE_ERROR = "Could not save. Try again.";
 
 function isEmail(value: string) {
@@ -32,10 +33,12 @@ export default function WaitlistForm({
   slot,
   from,
   framed = true,
+  compact = false,
 }: {
   slot?: string;
   from?: Role;
   framed?: boolean;
+  compact?: boolean;
 } = {}) {
   const [role, setRole] = useState<Role | undefined>(from);
   const [sport, setSport] = useState("");
@@ -54,10 +57,12 @@ export default function WaitlistForm({
     }
   }, [from]);
 
-  const shellClass = framed
-    ? "form-shell mx-auto w-full max-w-md"
-    : "mx-auto w-full";
-  const muscleName = slotLabel(slot);
+  const shellClass = compact
+    ? "w-full"
+    : framed
+      ? "form-shell"
+      : "w-full max-w-md";
+  const muscleName = compact ? undefined : slotLabel(slot);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -131,15 +136,15 @@ export default function WaitlistForm({
 
   if (done) {
     return (
-      <div className={`${shellClass} text-center`}>
-        <p className="text-[18px] leading-7 text-ink">{SUCCESS}</p>
+      <div className={shellClass}>
+        <p className="text-[16px] leading-7 text-ink">{SUCCESS}</p>
       </div>
     );
   }
 
   return (
     <div className={shellClass}>
-      <form onSubmit={handleSubmit} noValidate className="text-center">
+      <form onSubmit={handleSubmit} noValidate>
         {muscleName ? (
           <p className="mb-5">
             <span className="block text-[12px] text-muted">Selected muscle</span>
@@ -192,7 +197,7 @@ export default function WaitlistForm({
         </fieldset>
 
         {role === "athlete" ? (
-          <label className="mt-4 block">
+          <label className={compact ? "mt-3 block" : "mt-4 block"}>
             <span className="field-label">Sport</span>
             <input
               className="field"
@@ -223,7 +228,7 @@ export default function WaitlistForm({
           </label>
         </div>
 
-        <label className="mt-4 block">
+        <label className={compact ? "mt-3 block" : "mt-4 block"}>
           <span className="field-label">Name</span>
           <input
             className="field"
@@ -236,7 +241,7 @@ export default function WaitlistForm({
           />
         </label>
 
-        <label className="mt-4 block">
+        <label className={compact ? "mt-3 block" : "mt-4 block"}>
           <span className="field-label">Email</span>
           <input
             className="field"
@@ -251,12 +256,12 @@ export default function WaitlistForm({
           />
         </label>
 
-        <label className="mt-4 block">
+        <label className={compact ? "mt-3 block" : "mt-4 block"}>
           <span className="field-label">Social</span>
           <input
             className="field"
             name="social"
-            autoComplete="username"
+            autoComplete="off"
             spellCheck={false}
             value={social}
             onChange={(event) => setSocial(event.target.value)}
@@ -271,8 +276,12 @@ export default function WaitlistForm({
           </p>
         ) : null}
 
-        <button type="submit" disabled={busy} className="btn btn-solid mt-6 w-full">
-          {busy ? "Sending…" : "Join the waitlist"}
+        <button
+          type="submit"
+          disabled={busy}
+          className={`btn btn-solid w-full ${compact ? "mt-4" : "mt-6"}`}
+        >
+          {busy ? "Sending…" : "Request early access"}
         </button>
         <p className="mt-3 text-[12px] leading-5 text-muted">
           By joining you agree to the{" "}

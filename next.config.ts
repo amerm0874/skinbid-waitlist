@@ -6,6 +6,12 @@ const longCache = [
 
 const nextConfig: NextConfig = {
   transpilePackages: ["three"],
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**", pathname: "/**" },
+      { protocol: "http", hostname: "**", pathname: "/**" },
+    ],
+  },
   async redirects() {
     return [
       {
@@ -36,11 +42,24 @@ const nextConfig: NextConfig = {
         headers: longCache,
       },
       {
+        source: "/placeholder.glb",
+        headers: longCache,
+      },
+      {
         source: "/draco/:file*",
         headers: longCache,
       },
       {
         source: "/hero-slots.webp",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/sports/:file*",
         headers: [
           {
             key: "Cache-Control",

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import SiteShell from "@/components/landing/SiteShell";
+import { getSessionUser, isAdminEmail } from "@/lib/auth";
 import { createAdminSupabase } from "@/lib/supabase/admin";
-import { inboxIsOpen } from "@/lib/waitlist-inbox";
-import { unlockInbox } from "./unlock";
 
 export const metadata: Metadata = {
   title: "Waitlist inbox",
@@ -28,44 +28,13 @@ function socialFrom(row: WaitlistRow) {
   return row.instagram?.trim() || row.fields?.social?.trim() || "—";
 }
 
-export default async function InboxPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>;
-}) {
-  const params = await searchParams;
-  const open = await inboxIsOpen();
-
-  if (!open) {
-    return (
-      <SiteShell>
-        <main className="site-wrap py-12 md:py-16">
-          <h1 className="display text-[40px] md:text-[56px]">Waitlist inbox</h1>
-          <p className="mt-3 max-w-md text-[15px] text-muted">
-            Type the inbox password from your host settings to see saved emails.
-          </p>
-          <form action={unlockInbox} className="mt-8 max-w-md">
-            <label className="block">
-              <span className="field-label">Password</span>
-              <input
-                className="field"
-                type="password"
-                name="password"
-                autoComplete="current-password"
-              />
-            </label>
-            {params.error ? (
-              <p className="mt-4 text-[13px] text-danger" role="alert">
-                Wrong password.
-              </p>
-            ) : null}
-            <button type="submit" className="btn btn-solid mt-6 w-full">
-              Open inbox
-            </button>
-          </form>
-        </main>
-      </SiteShell>
-    );
+export default async function InboxPage() {
+  const { user } = await getSessionUser();
+  if (!user) {
+    redirect("/login");
+  }
+  if (!isAdminEmail(user.email)) {
+    redirect("/events");
   }
 
   const admin = createAdminSupabase();
@@ -88,12 +57,10 @@ export default async function InboxPage({
 
   return (
     <SiteShell>
-      <main className="site-wrap py-12 md:py-16">
+      <main className="site-wrap py-[var(--block-y)]">
         <h1 className="display text-[40px] md:text-[56px]">Waitlist inbox</h1>
         <p className="mt-3 max-w-lg text-[15px] text-muted">
-          {rows.length} saved. This list reads the real database. In Supabase,
-          open SQL Editor — not Auth users — and run{" "}
-          <span className="text-ink">select * from waitlist</span>.
+          {rows.length} saved. Admin only. A cookie cannot open this list.
         </p>
 
         {loadError ? (

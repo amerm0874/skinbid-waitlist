@@ -1,10 +1,29 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import { isAuctionOpen } from "@/lib/auction";
+import { isAuctionClosed } from "@/lib/auction";
 import { getSessionUser } from "@/lib/auth";
-import { createDodo } from "@/lib/dodo";
-import { BID_STEP_CENTS, FLOOR_CENTS } from "@/lib/config";
-import { nextBidCents } from "@/lib/money";
+import { categoryHoldsOtherZone } from "@/lib/category-lock";
+import { closeEventAuction, refundHeldOnZone } from "@/lib/close-auctions";
+import { notifyHeldBid } from "@/lib/email";
+import {
+  BID_STEP_CENTS,
+  FLOOR_CENTS,
+  brandOnboardingComplete,
+} from "@/lib/config";
 import { DEMO_SLUG } from "@/lib/demo-event";
+import { athleteAvatarReady, isReadyAvatar } from "@/lib/event-create";
+import { isPublishedEventStatus } from "@/lib/types";
+import { nextBidCents } from "@/lib/money";
+import {
+  createBidCheckout,
+  createPolarClient,
+  polarPaymentsEnabled,
+  resolveBidProductId,
+} from "@/lib/polar";
+import { takeToken } from "@/lib/rate-limit";
+import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
+import { isPersistedZoneId, loadLastZoneBids } from "@/lib/zone-bids";
+import { isZoneName } from "@/lib/zones";
 
 type Body = {
   slug?: string;
@@ -13,11 +32,62 @@ type Body = {
   amount_cents?: number;
 };
 
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const slug = url.searchParams.get("slug")?.trim() ?? "";
+  const zoneId = url.searchParams.get("zone_id")?.trim() ?? "";
+  if (!slug || slug === DEMO_SLUG || !isPersistedZoneId(zoneId)) {
+    return NextResponse.json({ bids: [] });
+  }
+
+  const db = createPublicSupabase();
+  if (!db) {
+    return NextResponse.json({ bids: [] });
+  }
+
+  const { data: event } = await db
+    .from("events")
+    .select("id, athlete_id, status")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!event || !isPublishedEventStatus(event.status)) {
+    return NextResponse.json({ bids: [] });
+  }
+
+  const { data: avatar } = await db
+    .from("avatars")
+    .select("glb_url, ready")
+    .eq("athlete_id", event.athlete_id)
+    .maybeSingle();
+  if (!isReadyAvatar(avatar)) {
+    return NextResponse.json({ bids: [] });
+  }
+
+  const { data: zone } = await db
+    .from("zones")
+    .select("id")
+    .eq("id", zoneId)
+    .eq("event_id", event.id)
+    .maybeSingle();
+  if (!zone) {
+    return NextResponse.json({ bids: [] });
+  }
+
+  return NextResponse.json({
+    bids: await loadLastZoneBids(db, zone.id),
+  });
+}
+
 export async function POST(request: Request) {
   const { supabase, user, profile } = await getSessionUser();
-  const body = (await request.json()) as Body;
-  const amount = Number(body.amount_cents);
-  const origin = new URL(request.url).origin;
+  let body: Body = {};
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Bad bid payload." }, { status: 400 });
+  }
+  const slug = body.slug?.trim() ?? "";
+  const zoneId = body.zone_id?.trim() ?? "";
 
   if (!user || !profile) {
     return NextResponse.json({ error: "Log in as a brand." }, { status: 401 });
@@ -25,150 +95,256 @@ export async function POST(request: Request) {
   if (profile.role !== "brand") {
     return NextResponse.json({ error: "Only brands bid." }, { status: 403 });
   }
-  if (!Number.isFinite(amount) || amount < FLOOR_CENTS) {
-    return NextResponse.json({ error: "Floor is $100." }, { status: 400 });
+  if (!brandOnboardingComplete(profile)) {
+    return NextResponse.json(
+      { error: "Finish brand name, website, and category first." },
+      { status: 403 },
+    );
+  }
+  if (!takeToken(`bid:${user.id}`, 20, 10 * 60 * 1000)) {
+    return NextResponse.json({ error: "Too many bids. Wait a minute." }, { status: 429 });
+  }
+  if (!slug || slug === DEMO_SLUG || zoneId.startsWith("demo-") || zoneId.startsWith("missing-")) {
+    return NextResponse.json(
+      { error: "This preview does not take bids." },
+      { status: 400 },
+    );
+  }
+  if (!supabase) {
+    return NextResponse.json({ error: "Database is not configured." }, { status: 503 });
   }
 
-  const dodo = createDodo();
-  const productId = process.env.DODO_BID_PRODUCT_ID;
-  if (!dodo || !productId) {
+  const admin = createAdminSupabase();
+  if (!admin) {
     return NextResponse.json(
-      { error: "Dodo is not configured. Add DODO_PAYMENTS_API_KEY and DODO_BID_PRODUCT_ID." },
+      { error: "Bidding needs the service role key." },
       { status: 503 },
     );
   }
 
-  let zoneId = body.zone_id ?? "";
-  let eventId = "";
-  let athleteId = "";
+  const { data: event } = await supabase
+    .from("events")
+    .select("id, athlete_id, date, status, slug")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!event || event.status !== "live") {
+    return NextResponse.json({ error: "Event is not live." }, { status: 400 });
+  }
+  const glbReady = await athleteAvatarReady(supabase, event.athlete_id);
+  if (!glbReady) {
+    return NextResponse.json({ error: "Event is not live." }, { status: 400 });
+  }
+  // Close bidding when now > event_start - 48 hours.
+  if (isAuctionClosed(event.date)) {
+    await closeEventAuction(event.id);
+    return NextResponse.json({ error: "Auction is closed." }, { status: 400 });
+  }
 
-  if (supabase && body.slug && body.slug !== DEMO_SLUG) {
-    const { data: event } = await supabase
-      .from("events")
-      .select("id, athlete_id, date, status")
-      .eq("slug", body.slug)
-      .maybeSingle();
-    if (!event || event.status !== "live") {
-      return NextResponse.json({ error: "Event is not live." }, { status: 400 });
-    }
-    if (!isAuctionOpen(event.date)) {
-      return NextResponse.json({ error: "Auction is closed." }, { status: 400 });
-    }
-    eventId = event.id;
-    athleteId = event.athlete_id;
-
-    const { data: zone } = await supabase
+  let zoneQuery = supabase
+    .from("zones")
+    .select("id, name, status")
+    .eq("event_id", event.id)
+    .eq("id", zoneId);
+  if (body.zone_name && isZoneName(body.zone_name)) {
+    zoneQuery = supabase
       .from("zones")
-      .select("id, status")
-      .eq("id", zoneId)
+      .select("id, name, status")
       .eq("event_id", event.id)
-      .maybeSingle();
-    if (!zone || zone.status !== "open") {
-      return NextResponse.json({ error: "Zone is closed." }, { status: 400 });
-    }
-
-    const { data: held } = await supabase
-      .from("bids")
-      .select("amount_cents")
-      .eq("zone_id", zone.id)
-      .eq("status", "held")
-      .order("amount_cents", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const min = nextBidCents(held?.amount_cents ?? null);
-    if (amount < min || (amount - (held?.amount_cents ?? 0)) % BID_STEP_CENTS !== 0 && held) {
-      if (amount < min) {
-        return NextResponse.json({ error: `Next bid is ${min / 100} USD.` }, { status: 400 });
-      }
-    }
-
-    if (profile.brand_category) {
-      const { data: eventZones } = await supabase
-        .from("zones")
-        .select("id")
-        .eq("event_id", event.id);
-      const ids = (eventZones ?? []).map((row) => row.id);
-      const { data: categoryBids } = await supabase
-        .from("bids")
-        .select("id, brand_id, zone_id")
-        .in("zone_id", ids)
-        .in("status", ["held", "won"]);
-      const brandIds = [...new Set((categoryBids ?? []).map((row) => row.brand_id))];
-      if (brandIds.length) {
-        const { data: brands } = await supabase
-          .from("profiles")
-          .select("id, brand_category")
-          .in("id", brandIds);
-        const sameCategory = (brands ?? []).filter(
-          (row) =>
-            row.brand_category &&
-            row.brand_category === profile.brand_category,
-        );
-        const takenBySameCategory = sameCategory.some((row) =>
-          (categoryBids ?? []).some(
-            (bid) => bid.brand_id === row.id && bid.zone_id !== zone.id,
-          ),
-        );
-        if (takenBySameCategory) {
-          return NextResponse.json(
-            { error: "This category already holds a zone on this event." },
-            { status: 400 },
-          );
-        }
-      }
-    }
+      .eq("id", zoneId)
+      .eq("name", body.zone_name);
+  }
+  const { data: zone } = await zoneQuery.maybeSingle();
+  if (!zone || zone.status !== "open") {
+    return NextResponse.json({ error: "Zone is closed." }, { status: 400 });
   }
 
-  const demoBid = !supabase || zoneId.startsWith("demo-") || !zoneId;
-  let bidId = crypto.randomUUID();
+  const { data: held } = await admin
+    .from("bids")
+    .select("id, amount_cents, brand_id")
+    .eq("zone_id", zone.id)
+    .eq("status", "held")
+    .order("amount_cents", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (!demoBid && supabase) {
-    const { data: bid, error: bidError } = await supabase
-      .from("bids")
-      .insert({
-        zone_id: zoneId,
-        brand_id: user.id,
-        amount_cents: amount,
-        status: "pending",
-      })
-      .select("id")
-      .single();
-    if (bidError || !bid) {
-      console.log("Bid insert failed", bidError?.message);
-      return NextResponse.json({ error: "Could not place the bid." }, { status: 500 });
-    }
-    bidId = bid.id;
+  const amount = nextBidCents(held?.amount_cents ?? null);
+  if (amount < FLOOR_CENTS || amount % BID_STEP_CENTS !== 0) {
+    return NextResponse.json({ error: "Floor is $100." }, { status: 400 });
+  }
+  if (Number.isFinite(body.amount_cents) && body.amount_cents !== amount) {
+    return NextResponse.json(
+      { error: `Next bid is ${amount / 100} USD.` },
+      { status: 409 },
+    );
   }
 
-  const session = await dodo.checkoutSessions.create({
-    product_cart: [
-      {
-        product_id: productId,
-        quantity: 1,
-        amount,
-      },
-    ],
-    customer: {
-      email: user.email ?? "brand@skinbid.com",
-      name: profile.name ?? "Brand",
-    },
-    return_url: `${origin}/e/${body.slug ?? "demo"}`,
-    metadata: {
-      bid_id: bidId,
-      zone_id: zoneId,
+  const locked = await categoryHoldsOtherZone(
+    admin,
+    event.id,
+    zone.id,
+    user.id,
+    profile.brand_category,
+  );
+  if (locked) {
+    return NextResponse.json(
+      { error: "This category already holds a zone on this event." },
+      { status: 400 },
+    );
+  }
+
+  if (polarPaymentsEnabled()) {
+    return startPolarCheckout({
+      request,
+      admin,
+      slug,
+      zoneId: zone.id,
+      zoneName: zone.name,
+      brandId: user.id,
+      amount,
+      customerEmail: user.email,
+      customerName: profile.name,
+    });
+  }
+
+  // Production must take payment. Local `next dev` can still insert held.
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Payments are not ready." },
+      { status: 503 },
+    );
+  }
+
+  // No Polar token: insert as held immediately. Page still bids.
+  const { data: bid, error: bidError } = await admin
+    .from("bids")
+    .insert({
+      zone_id: zone.id,
       brand_id: user.id,
-      event_id: eventId,
-      athlete_id: athleteId,
-    },
-  });
-
-  if (supabase && !demoBid && session.session_id) {
-    await supabase
-      .from("bids")
-      .update({ dodo_checkout_id: session.session_id })
-      .eq("id", bidId);
+      amount_cents: amount,
+      status: "held",
+    })
+    .select("id")
+    .single();
+  if (bidError || !bid) {
+    console.log("Bid insert failed", bidError?.message);
+    return NextResponse.json({ error: "Could not place the bid." }, { status: 500 });
   }
 
-  console.log("Dodo checkout created", bidId);
-  return NextResponse.json({ checkout_url: session.checkout_url, bid_id: bidId });
+  const { data: heldNow } = await admin
+    .from("bids")
+    .select("id, amount_cents, created_at")
+    .eq("zone_id", zone.id)
+    .eq("status", "held")
+    .order("amount_cents", { ascending: false })
+    .order("created_at", { ascending: false });
+  const leader = heldNow?.[0];
+  if (!leader || leader.id !== bid.id) {
+    await admin.from("bids").update({ status: "refunded" }).eq("id", bid.id);
+    const min = nextBidCents(leader?.amount_cents ?? null);
+    return NextResponse.json(
+      { error: `Next bid is ${min / 100} USD.` },
+      { status: 409 },
+    );
+  }
+
+  await refundHeldOnZone(zone.id, bid.id, { refundPayment: false });
+  await notifyHeldBid({
+    bidId: bid.id,
+    athleteId: event.athlete_id,
+    currentBrandId: user.id,
+    zoneName: zone.name,
+    amountCents: amount,
+    eventSlug: event.slug,
+    previousBid: held
+      ? { id: held.id, brandId: held.brand_id }
+      : null,
+  });
+  revalidatePath(`/e/${slug}`);
+  revalidatePath("/e/[slug]", "page");
+  console.log("Bid held", bid.id, zone.name, amount);
+  return NextResponse.json({
+    bid_id: bid.id,
+    amount_cents: amount,
+    status: "held",
+  });
+}
+
+async function startPolarCheckout(input: {
+  request: Request;
+  admin: NonNullable<ReturnType<typeof createAdminSupabase>>;
+  slug: string;
+  zoneId: string;
+  zoneName: string;
+  brandId: string;
+  amount: number;
+  customerEmail?: string | null;
+  customerName?: string | null;
+}) {
+  const polar = createPolarClient();
+  if (!polar) {
+    return NextResponse.json({ error: "Payments are not ready." }, { status: 503 });
+  }
+
+  const { data: bid, error: bidError } = await input.admin
+    .from("bids")
+    .insert({
+      zone_id: input.zoneId,
+      brand_id: input.brandId,
+      amount_cents: input.amount,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+  if (bidError || !bid) {
+    console.log("Bid insert failed", bidError?.message);
+    return NextResponse.json({ error: "Could not place the bid." }, { status: 500 });
+  }
+
+  try {
+    const productId = await resolveBidProductId(polar);
+    const forwarded = input.request.headers.get("x-forwarded-for");
+    const checkout = await createBidCheckout({
+      polar,
+      productId,
+      amountCents: input.amount,
+      bidId: bid.id,
+      zoneId: input.zoneId,
+      brandId: input.brandId,
+      slug: input.slug,
+      customerEmail: input.customerEmail,
+      customerName: input.customerName,
+      customerIp:
+        forwarded?.split(",")[0]?.trim() ||
+        input.request.headers.get("x-real-ip")?.trim() ||
+        null,
+    });
+    const { error: checkoutSaveError } = await input.admin
+      .from("bids")
+      .update({
+        polar_checkout_id: checkout.id,
+        dodo_checkout_id: checkout.id,
+      })
+      .eq("id", bid.id);
+    if (checkoutSaveError) {
+      console.log("Polar checkout id save", checkoutSaveError.message);
+      await input.admin
+        .from("bids")
+        .update({ dodo_checkout_id: checkout.id })
+        .eq("id", bid.id);
+    }
+    console.log("Polar checkout", bid.id, input.zoneName, input.amount, checkout.id);
+    return NextResponse.json({
+      bid_id: bid.id,
+      amount_cents: input.amount,
+      status: "pending",
+      checkout_url: checkout.url,
+    });
+  } catch (error) {
+    console.log("Polar checkout failed", error);
+    await input.admin.from("bids").update({ status: "failed" }).eq("id", bid.id);
+    return NextResponse.json(
+      { error: "Checkout did not open. Try again." },
+      { status: 502 },
+    );
+  }
 }

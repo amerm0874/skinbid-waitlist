@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 import { getSessionUser } from "@/lib/auth";
 import { SITE } from "@/lib/config";
+import { sendEmail } from "@/lib/email";
+import { takeToken } from "@/lib/rate-limit";
 
 type Body = {
   brand_id?: string;
@@ -12,6 +13,9 @@ export async function POST(request: Request) {
   const { supabase, user, profile } = await getSessionUser();
   if (!user || profile?.role !== "athlete") {
     return NextResponse.json({ error: "Athletes send outreach." }, { status: 403 });
+  }
+  if (!takeToken(`outreach:${user.id}`, 8, 10 * 60 * 1000)) {
+    return NextResponse.json({ error: "Too many messages. Wait a minute." }, { status: 429 });
   }
   if (!supabase) {
     return NextResponse.json({ error: "Database is not configured." }, { status: 503 });
@@ -35,43 +39,48 @@ export async function POST(request: Request) {
     .eq("status", "live")
     .maybeSingle();
 
-  const key = process.env.RESEND_API_KEY;
-  if (!key) {
-    console.log("Outreach skipped — no RESEND_API_KEY", brand.name);
+  const eventLine = event
+    ? `${event.name} · ${event.city ?? ""} · ${event.date}`
+    : body.event_name || "an upcoming event";
+  const pageLine = event ? `Page: ${SITE.url}/e/${event.slug}` : "";
+  const text = [
+    `${profile.name ?? "An athlete"} asked SkinBid to reach ${brand.name ?? "a brand"}.`,
+    `Event: ${eventLine}`,
+    `Athlete social: ${profile.social ?? "—"}`,
+    `Brand site: ${brand.website ?? "—"}`,
+    `Category: ${brand.brand_category ?? "—"}`,
+    pageLine,
+    "Reply to SkinBid. Do not open an in-app thread.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<body>
+${text
+  .split("\n")
+  .map((line) => `<p>${line.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</p>`)
+  .join("\n")}
+</body>
+</html>`;
+
+  const entityId = `${user.id}:${body.brand_id}:${event?.slug ?? body.event_name ?? "none"}`;
+  const result = await sendEmail("outreach", entityId, {
+    to: SITE.email,
+    subject: `Athlete outreach: ${profile.name ?? "Athlete"} × ${brand.name ?? "brand"}`,
+    text,
+    html,
+  });
+
+  if (!process.env.RESEND_API_KEY?.trim()) {
     return NextResponse.json({
       ok: true,
       stored: "log",
     });
   }
-
-  const resend = new Resend(key);
-  const from = process.env.RESEND_FROM ?? "SkinBid <skinbidme@gmail.com>";
-  const eventLine = event
-    ? `${event.name} · ${event.city ?? ""} · ${event.date}`
-    : body.event_name || "an upcoming event";
-
-  const { error } = await resend.emails.send({
-    from,
-    to: SITE.email,
-    subject: `Athlete outreach: ${profile.name ?? "Athlete"} × ${brand.name ?? "brand"}`,
-    text: [
-      `${profile.name ?? "An athlete"} asked SkinBid to reach ${brand.name ?? "a brand"}.`,
-      `Event: ${eventLine}`,
-      `Athlete social: ${profile.social ?? "—"}`,
-      `Brand site: ${brand.website ?? "—"}`,
-      `Category: ${brand.brand_category ?? "—"}`,
-      event ? `Page: ${SITE.url}/e/${event.slug}` : "",
-      "Reply to SkinBid. Do not open an in-app thread.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  });
-
-  if (error) {
-    console.log("Resend failed", error);
+  if (result.error) {
     return NextResponse.json({ error: "Email did not send." }, { status: 500 });
   }
 
-  console.log("Outreach email sent from SkinBid");
   return NextResponse.json({ ok: true });
 }

@@ -24,6 +24,9 @@ async function readRows(): Promise<WaitlistRow[]> {
 
 export async function appendLocalWaitlist(row: Omit<WaitlistRow, "id" | "created_at">) {
   const rows = await readRows();
+  const isNew = !rows.some(
+    (existing) => existing.email.toLowerCase() === row.email.toLowerCase(),
+  );
   const next: WaitlistRow = {
     ...row,
     id: crypto.randomUUID(),
@@ -33,5 +36,5 @@ export async function appendLocalWaitlist(row: Omit<WaitlistRow, "id" | "created
   await mkdir(path.dirname(FILE), { recursive: true });
   await writeFile(FILE, JSON.stringify(rows, null, 2), "utf8");
   console.log("Waitlist saved locally");
-  return next;
+  return { row: next, isNew };
 }

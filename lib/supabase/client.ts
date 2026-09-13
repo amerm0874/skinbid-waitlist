@@ -1,9 +1,12 @@
 import { createBrowserClient } from "@supabase/ssr";
-import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
+import {
+  getSupabaseAnonKey,
+  getSupabaseUrl,
+  googleAuthEnabled,
+  hasPublicSupabase,
+} from "@/lib/supabase/env";
 
-export function hasPublicSupabase() {
-  return Boolean(getSupabaseUrl() && getSupabaseAnonKey());
-}
+export { googleAuthEnabled, hasPublicSupabase };
 
 export function createBrowserSupabase() {
   const url = getSupabaseUrl();

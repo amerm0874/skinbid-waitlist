@@ -1,3 +1,5 @@
+import { loadOwnPayout } from "@/lib/payout";
+import { loadProfileRow } from "@/lib/profile";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
@@ -26,12 +28,14 @@ export async function getSessionUser() {
   if (!user) {
     return { supabase, user: null, profile: null as Profile | null };
   }
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      "id, role, name, country, social, brand_category, website, logo_url",
-    )
-    .eq("id", user.id)
-    .maybeSingle();
-  return { supabase, user, profile: (profile as Profile | null) ?? null };
+  const profile = await loadProfileRow(supabase, user.id);
+  if (!profile) {
+    return { supabase, user, profile: null };
+  }
+  const payout = await loadOwnPayout(supabase, user.id);
+  return {
+    supabase,
+    user,
+    profile: { ...(profile as Omit<Profile, "payout_rail" | "payout_account">), ...payout },
+  };
 }

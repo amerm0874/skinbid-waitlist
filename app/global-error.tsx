@@ -12,9 +12,9 @@ export default function GlobalError({
     <html lang="en">
       <body className="min-h-full bg-bg font-sans text-ink antialiased">
         <title>Something broke — SkinBid</title>
-        <div className="site-wrap py-20">
+        <div className="site-wrap py-[var(--block-y)]">
           <h1 className="display text-[40px]">Something broke</h1>
-          <p className="mt-3 text-muted">Try again, or go home.</p>
+          <p className="page-lead">Try again, or go home.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button type="button" className="btn btn-solid" onClick={() => retry()}>
               Try again

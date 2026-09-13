@@ -1,11 +1,14 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { getSessionUser } from "@/lib/auth";
-import { ProductNav } from "@/components/product/ProductNav";
+import { sessionGateRedirect } from "@/lib/config";
+import { NO_OG_METADATA } from "@/lib/seo";
+import { ProductShell } from "@/components/product/ProductShell";
 import ProofForm from "./ProofForm";
 
 export const metadata: Metadata = {
   title: "Proof",
+  ...NO_OG_METADATA,
 };
 
 export default async function ProofPage({
@@ -14,7 +17,11 @@ export default async function ProofPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, user } = await getSessionUser();
+  const { supabase, user, profile } = await getSessionUser();
+  const gate = sessionGateRedirect(user, profile, `/proof/${id}`);
+  if (gate) {
+    redirect(gate);
+  }
   if (!user) {
     redirect("/login");
   }
@@ -32,19 +39,31 @@ export default async function ProofPage({
     notFound();
   }
 
+  const { data: proof } = await supabase
+    .from("proofs")
+    .select("status")
+    .eq("event_id", event.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const status = proof?.status;
+  const existing =
+    status === "pending" || status === "approved" || status === "rejected"
+      ? { status }
+      : null;
+
   return (
-    <div className="min-h-full bg-bg">
-      <ProductNav email={user.email} />
-      <main className="site-wrap py-12">
-        <h1 className="display text-[40px]">Proof — {event.name}</h1>
-        <p className="mt-2 max-w-md text-[14px] text-muted">
-          Face or bib visible. Wrong day or wrong zone is a reject. Brand is
-          refunded if we reject.
-        </p>
-        <div className="mt-8">
-          <ProofForm eventId={event.id} userId={user.id} />
-        </div>
-      </main>
-    </div>
+    <ProductShell email={user.email}>
+      <div className="page-stack">
+        <h1 className="slot-board-kicker">Proof</h1>
+        <ProofForm
+          eventId={event.id}
+          eventName={event.name}
+          userId={user.id}
+          existing={existing}
+        />
+      </div>
+    </ProductShell>
   );
 }

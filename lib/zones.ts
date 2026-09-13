@@ -52,3 +52,27 @@ export const ZONE_LAYOUT: Record<
 export function isZoneName(value: string): value is ZoneName {
   return (ZONE_NAMES as readonly string[]).includes(value);
 }
+
+// Highest held bid, else first open zone. Callers show floor when current_cents is null.
+export function featuredSlot(
+  zones: Array<{
+    name: string;
+    status?: string;
+    current_cents?: number | null;
+  }>,
+) {
+  const rows = zones.filter((zone): zone is typeof zone & { name: ZoneName } =>
+    isZoneName(zone.name),
+  );
+  const withBid = rows
+    .filter((zone) => (zone.current_cents ?? 0) > 0)
+    .sort((a, b) => (b.current_cents ?? 0) - (a.current_cents ?? 0))[0];
+  const open = rows.find((zone) => zone.status !== "closed");
+  const pick = withBid ?? open ?? rows[0];
+  const name = pick?.name ?? "chest_l";
+  return {
+    name,
+    label: ZONE_LABEL[name],
+    current_cents: pick?.current_cents ?? null,
+  };
+}

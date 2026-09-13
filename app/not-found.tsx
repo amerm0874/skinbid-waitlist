@@ -1,13 +1,23 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import { getSessionUser } from "@/lib/auth";
+import { NO_OG_METADATA } from "@/lib/seo";
+import { EmptyState } from "@/components/product/EmptyState";
+import { ProductShell } from "@/components/product/ProductShell";
 
-export default function NotFound() {
+export const metadata: Metadata = {
+  title: "Not found",
+  ...NO_OG_METADATA,
+};
+
+export default async function NotFound() {
+  const { user, profile } = await getSessionUser();
+
   return (
-    <div className="site-wrap py-20">
-      <h1 className="display text-[40px]">Not found</h1>
-      <p className="mt-3 text-muted">That page is not on SkinBid.</p>
-      <Link href="/" className="btn btn-solid mt-8 inline-flex">
-        Home
-      </Link>
-    </div>
+    <ProductShell email={user?.email} role={profile?.role}>
+      <div className="page-stack">
+        <h1 className="display page-title">Not found</h1>
+        <EmptyState line="That page is not on SkinBid." />
+      </div>
+    </ProductShell>
   );
 }

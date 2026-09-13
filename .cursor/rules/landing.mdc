@@ -1,0 +1,6 @@
+---
+description: Landing is frozen
+globs: app/page.tsx, components/landing/**
+---
+
+Never edit the homepage or components/landing. Never change :root tokens to restyle product pages. Scope product styles under .product.

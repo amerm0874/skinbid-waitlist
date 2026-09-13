@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { appendLocalWaitlist } from "@/lib/waitlist-local";
+import { sendWaitlistWelcome } from "@/lib/waitlist-email";
 import {
   WAITLIST_RATE_LIMIT,
   WAITLIST_RATE_WINDOW_MS,
@@ -64,7 +65,7 @@ async function writeWaitlist(
     from: Role;
     fields: Record<string, string>;
   },
-) {
+): Promise<{ ok: boolean; isNew: boolean }> {
   const existingId = await findWaitlistId(supabase, row.email);
   const updates: Record<string, unknown>[] = [
     {
@@ -89,11 +90,11 @@ async function writeWaitlist(
         .eq("id", existingId);
       if (!error) {
         console.log("Waitlist updated in Supabase");
-        return true;
+        return { ok: true, isNew: false };
       }
       console.log("Waitlist update failed", error.message);
     }
-    return true;
+    return { ok: true, isNew: false };
   }
 
   const inserts: Record<string, unknown>[] = [
@@ -120,16 +121,16 @@ async function writeWaitlist(
     const { error } = await supabase.from("waitlist").insert(attempt);
     if (!error) {
       console.log("Waitlist saved to Supabase");
-      return true;
+      return { ok: true, isNew: true };
     }
     const message = error.message || "";
     console.log("Waitlist insert failed", message);
     if (/duplicate|unique/i.test(message)) {
-      return true;
+      return { ok: true, isNew: false };
     }
   }
 
-  return false;
+  return { ok: false, isNew: false };
 }
 
 export async function POST(request: Request) {
@@ -199,7 +200,7 @@ export async function POST(request: Request) {
         from,
         fields,
       });
-      if (wrote) {
+      if (wrote.ok) {
         if (admin) {
           const storedId = await findWaitlistId(admin, email);
           if (!storedId) {
@@ -207,6 +208,13 @@ export async function POST(request: Request) {
             return saveFailed();
           }
         }
+        await sendWaitlistWelcome({
+          email,
+          name,
+          role: from,
+          sport,
+          isNew: wrote.isNew,
+        });
         return saved();
       }
     } catch (error) {
@@ -219,7 +227,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    await appendLocalWaitlist({ email, name, social, fields });
+    const local = await appendLocalWaitlist({ email, name, social, fields });
+    await sendWaitlistWelcome({
+      email,
+      name,
+      role: from,
+      sport,
+      isNew: local.isNew,
+    });
     return NextResponse.json({ ok: true, stored: "local" });
   } catch (error) {
     console.log("Waitlist local save failed", error);

@@ -1,6 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { destinationForSession } from "@/lib/auth-map";
 import {
+  isAuthGatePath,
+  loginPath,
+  parseRole,
+  SIGNIN_AGAIN_HREF,
+} from "@/lib/config";
+import {
+  isAuthErrorQuery,
   isHiddenWaitlistApi,
   isHiddenWaitlistPage,
   isWaitlistOnly,
@@ -17,6 +25,10 @@ export async function proxy(request: NextRequest) {
     if (isHiddenWaitlistApi(pathname)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+  }
+
+  if (pathname === "/" && isAuthErrorQuery(request.nextUrl.searchParams)) {
+    return NextResponse.redirect(new URL(SIGNIN_AGAIN_HREF, request.url));
   }
 
   const url =
@@ -47,7 +59,27 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const role = parseRole(request.nextUrl.searchParams.get("role"));
+
+  if (!user && isAuthGatePath(pathname)) {
+    const next =
+      pathname + (request.nextUrl.search ? request.nextUrl.search : "");
+    return NextResponse.redirect(
+      new URL(loginPath(role, next), request.url),
+    );
+  }
+
+  if (user && pathname === "/") {
+    const destination = await destinationForSession(supabase, user.id, role);
+    if (destination && destination !== "/") {
+      return NextResponse.redirect(new URL(destination, request.url));
+    }
+    return NextResponse.redirect(new URL("/onboarding", request.url));
+  }
+
   return response;
 }
 

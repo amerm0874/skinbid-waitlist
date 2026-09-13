@@ -1,5 +1,4 @@
-// One place to read Supabase keys. New projects use
-// PUBLISHABLE / SECRET names. Older ones use ANON / SERVICE_ROLE.
+// Public Supabase URL and anon key only. Service role lives in lib/supabase/admin.ts.
 
 export function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -13,10 +12,14 @@ export function getSupabaseAnonKey() {
   );
 }
 
-export function getSupabaseServiceKey() {
-  return (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SECRET_KEY ||
-    ""
+export function hasPublicSupabase() {
+  return Boolean(getSupabaseUrl() && getSupabaseAnonKey());
+}
+
+// Google secrets live in the Supabase dashboard. Hide the button if the
+// public client cannot start — do not read GOOGLE_* keys.
+export function googleAuthEnabled() {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL && getSupabaseAnonKey(),
   );
 }

@@ -56,9 +56,8 @@ export default function AboutPage() {
           id="waitlist-bottom"
           className="site-wrap max-w-2xl pb-[var(--block-y)]"
         >
-          <a href="/waitlist" className="press-btn">
-            <span className="press-btn-plate" aria-hidden="true" />
-            <span className="press-btn-face">Join waitlist</span>
+          <a href="/waitlist" className="btn btn-solid">
+            Get early access
           </a>
         </section>
       </main>

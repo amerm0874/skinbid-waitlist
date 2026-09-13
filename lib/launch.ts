@@ -1,15 +1,21 @@
-// Waitlist launch: hide the unfinished marketplace until we turn this off.
-// Set WAITLIST_ONLY=false in .env when auctions should go live.
+// Waitlist landing stays on `/` and `/waitlist`.
+// Set WAITLIST_ONLY=true to hide product URLs. Unset or false unlocks them.
 
 const HIDDEN_PAGES = new Set([
   "events",
   "login",
+  "signup",
   "admin",
   "new",
   "outreach",
   "onboarding",
   "e",
+  "races",
+  "a",
   "proof",
+  "me",
+  "settings",
+  "inbox",
 ]);
 
 const HIDDEN_APIS = new Set(["bids", "events", "admin", "outreach"]);
@@ -19,7 +25,7 @@ function firstSegment(pathname: string, index: number) {
 }
 
 export function isWaitlistOnly() {
-  return process.env.WAITLIST_ONLY !== "false";
+  return process.env.WAITLIST_ONLY === "true";
 }
 
 export function isHiddenWaitlistPage(pathname: string) {
@@ -38,8 +44,55 @@ export function safeNextPath(raw: string | null, fallback = "/") {
   if (!raw) {
     return fallback;
   }
-  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("://")) {
+  if (
+    !raw.startsWith("/") ||
+    raw.startsWith("//") ||
+    raw.includes("://") ||
+    raw.includes("\\")
+  ) {
     return fallback;
   }
   return raw;
+}
+
+const BLOCKED_RETURN_PATHS = new Set([
+  "/",
+  "/login",
+  "/signup",
+  "/auth/callback",
+]);
+
+// Post-auth return. Never send people to `/` or back through login.
+export function safeReturnPath(raw: string | null) {
+  const next = safeNextPath(raw, "");
+  if (!next) {
+    return "";
+  }
+  const pathOnly = next.split("?")[0] ?? "";
+  if (BLOCKED_RETURN_PATHS.has(pathOnly)) {
+    return "";
+  }
+  if (/(?:^|[?&])error=/.test(next)) {
+    return "";
+  }
+  return next;
+}
+
+export function isAuthErrorQuery(params: { get(name: string): string | null }) {
+  return Boolean(
+    params.get("error") ||
+      params.get("error_code") ||
+      params.get("error_description"),
+  );
+}
+
+export function isBadOAuthState(params: { get(name: string): string | null }) {
+  const code = (params.get("error_code") ?? "").toLowerCase();
+  const error = (params.get("error") ?? "").toLowerCase();
+  const description = (params.get("error_description") ?? "").toLowerCase();
+  return (
+    code === "bad_oauth_state" ||
+    error.includes("bad_oauth_state") ||
+    description.includes("bad_oauth_state")
+  );
 }

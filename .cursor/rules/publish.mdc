@@ -1,0 +1,13 @@
+---
+description: No ready GLB → event stays draft
+alwaysApply: true
+---
+
+Never publish an event without `avatars.ready` and a real `glb_url`. No scan stays `draft`.
+
+- Not on `/events`
+- `/e/[slug]` 404s (even for the athlete)
+- `placeholder.glb` only on `/e/demo`
+- Do not fall back to the placeholder on real event pages
+- Do not insert or update `status = live` without a ready GLB
+- Do not edit `/` or `components/landing`

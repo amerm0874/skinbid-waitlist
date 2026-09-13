@@ -25,13 +25,21 @@ export default function OutreachForm({ brands }: { brands: Brand[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brand_id: brandId, event_name: eventName }),
       });
-      const payload = (await response.json()) as { error?: string; ok?: boolean };
+      const payload = (await response.json()) as {
+        error?: string;
+        ok?: boolean;
+        stored?: string;
+      };
       if (!response.ok) {
         setMessage(payload.error || "Email did not send.");
         return;
       }
-      console.log("Outreach email queued");
-      setMessage("SkinBid emailed that brand. They reply to us, not you.");
+      console.log("Outreach email queued", payload.stored ?? "sent");
+      setMessage(
+        payload.stored === "log"
+          ? "No email key yet. Request stored in the server log."
+          : "SkinBid emailed that brand. They reply to us, not you.",
+      );
     } catch (error) {
       console.log("Outreach failed", error);
       setMessage("Email did not send.");
@@ -41,11 +49,14 @@ export default function OutreachForm({ brands }: { brands: Brand[] }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-md">
+    <form onSubmit={handleSubmit} className="form-shell">
       <label className="block">
         <span className="field-label">Brand</span>
         <select
           className="field"
+          name="brand_id"
+          autoComplete="off"
+          required
           value={brandId}
           onChange={(e) => setBrandId(e.target.value)}
         >
@@ -60,9 +71,10 @@ export default function OutreachForm({ brands }: { brands: Brand[] }) {
         <span className="field-label">Your event</span>
         <input
           className="field"
+          name="event_name"
+          autoComplete="off"
           value={eventName}
           onChange={(e) => setEventName(e.target.value)}
-          placeholder="City marathon, 12 Oct"
         />
       </label>
       <button type="submit" disabled={busy || !brandId} className="btn btn-solid mt-5">
