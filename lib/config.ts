@@ -133,6 +133,15 @@ export function looksLikeEmail(value: string) {
 export const ATHLETE_AGE_MIN = 18;
 export const ATHLETE_AGE_MAX = 99;
 
+export const ATHLETE_GENDERS = ["Male", "Female", "Other"] as const;
+export type AthleteGender = (typeof ATHLETE_GENDERS)[number];
+
+export function isAthleteGender(
+  value: string | null | undefined,
+): value is AthleteGender {
+  return (ATHLETE_GENDERS as readonly string[]).includes(value ?? "");
+}
+
 export const ATHLETE_SPORTS = [
   "HYROX",
   "Running",

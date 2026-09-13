@@ -4,7 +4,6 @@ import { SITE } from "@/lib/config";
 
 const FOOTER_LINKS = [
   { href: "/", label: "Home" },
-  { href: "/waitlist", label: "Waitlist" },
   { href: "/about", label: "About" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
@@ -16,6 +15,7 @@ export function LandingNav() {
     <header className="site-header">
       <Wordmark />
       <nav className="nav-links">
+        <Link href="/events">Events</Link>
         <Link href="/login">Log in</Link>
       </nav>
     </header>

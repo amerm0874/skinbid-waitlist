@@ -8,7 +8,6 @@ import {
   goThroughAuthCallback,
   PASSWORD_MIN,
   rememberIntendedRole,
-  sendLoginLink,
 } from "@/lib/auth-client";
 import {
   looksLikeEmail,
@@ -30,7 +29,7 @@ export default function LoginForm({
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState<"password" | "google" | "link" | null>(null);
+  const [busy, setBusy] = useState<"password" | "google" | null>(null);
   const [message, setMessage] = useState(errorNotice ?? "");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -79,24 +78,6 @@ export default function LoginForm({
     if (error) {
       setMessage(error);
     }
-  }
-
-  async function handleLoginLink() {
-    setMessage("");
-    const trimmed = email.trim();
-    if (!looksLikeEmail(trimmed)) {
-      setMessage("Enter your email first.");
-      return;
-    }
-    setBusy("link");
-    const error = await sendLoginLink(trimmed, role, next);
-    setBusy(null);
-    if (error) {
-      setMessage(error);
-      return;
-    }
-    console.log("Login link sent", role ?? "no role");
-    setMessage(`Check ${trimmed} for the login link.`);
   }
 
   return (
@@ -152,15 +133,6 @@ export default function LoginForm({
       ) : null}
 
       {message ? <p className="mt-4 text-[14px] text-muted">{message}</p> : null}
-
-      <button
-        type="button"
-        disabled={busy !== null}
-        onClick={handleLoginLink}
-        className="mt-8 border-0 bg-transparent p-0 text-left text-[13px] text-muted"
-      >
-        {busy === "link" ? "Sending…" : "Email me a login link"}
-      </button>
     </div>
   );
 }

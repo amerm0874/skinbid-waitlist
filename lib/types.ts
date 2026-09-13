@@ -22,6 +22,7 @@ export type Profile = {
   country: string | null;
   dob: string | null;
   age: number | null;
+  gender?: string | null;
   sport: string | null;
   sport_detail?: string | null;
   social: string | null;

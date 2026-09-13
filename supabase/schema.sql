@@ -79,6 +79,14 @@ alter table public.profiles add column if not exists sport text;
 alter table public.profiles add column if not exists sport_detail text;
 alter table public.profiles add column if not exists socials jsonb;
 alter table public.profiles add column if not exists photo_url text;
+alter table public.profiles add column if not exists gender text;
+
+alter table public.profiles drop constraint if exists profiles_gender_check;
+alter table public.profiles add constraint profiles_gender_check
+  check (
+    gender is null
+    or gender in ('Male', 'Female', 'Other')
+  );
 alter table public.profiles drop constraint if exists profiles_age_check;
 alter table public.profiles add constraint profiles_age_check
   check (

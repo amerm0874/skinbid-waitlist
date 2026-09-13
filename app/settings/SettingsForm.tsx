@@ -3,9 +3,11 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ATHLETE_GENDERS,
   BRAND_CATEGORIES,
   PAYOUT_ACCOUNT_MAX,
   initialSportDetail,
+  isAthleteGender,
   isAthleteSport,
   isBrandCategory,
   looksLikeEmail,
@@ -61,6 +63,9 @@ export default function SettingsForm({
   const isBrand = profile.role === "brand";
   const [name, setName] = useState(profile.name ?? "");
   const [country, setCountry] = useState(() => profile.country?.trim() ?? "");
+  const [gender, setGender] = useState(
+    isAthleteGender(profile.gender) ? profile.gender : "",
+  );
   const [sport, setSport] = useState(
     isAthleteSport(profile.sport) ? profile.sport : "",
   );
@@ -110,6 +115,9 @@ export default function SettingsForm({
     }
     if (!country.trim() || (!isCountry(country) && country !== profile.country)) {
       return "Pick your country.";
+    }
+    if (!isAthleteGender(gender)) {
+      return "Pick a gender.";
     }
     const parsedSport = parseAthleteSport(sport, sportDetail);
     if (!parsedSport.ok) {
@@ -174,6 +182,7 @@ export default function SettingsForm({
           role: profile.role,
           name: name.trim(),
           country: isBrand ? "" : country.trim(),
+          gender: isBrand ? "" : gender,
           sport: isBrand ? "" : sport,
           sport_detail: isBrand ? null : sportDetail,
           socials: isBrand ? [] : accounts,
@@ -331,6 +340,26 @@ export default function SettingsForm({
           <label className="mt-4 block">
             <span className="field-label">Country</span>
             <CountrySelect required value={country} onChange={setCountry} />
+          </label>
+          <label className="mt-4 block">
+            <span className="field-label">Gender</span>
+            <select
+              className="field"
+              name="gender"
+              autoComplete="off"
+              required
+              value={gender}
+              onChange={(event) => setGender(event.target.value)}
+            >
+              <option value="" disabled>
+                Select gender
+              </option>
+              {ATHLETE_GENDERS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
           <SportFields
             sport={sport}

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   ageFromDob,
   isAdultDob,
+  isAthleteGender,
   isBrandCategory,
   looksLikeEmail,
   parseAthleteSport,
@@ -22,6 +23,9 @@ import {
 import type { Profile } from "@/lib/types";
 
 export const PROFILE_PUBLIC_SELECT =
+  "id, role, name, country, dob, age, gender, sport, sport_detail, social, socials, brand_category, website, logo_url, photo_url";
+
+const PROFILE_PUBLIC_SELECT_NO_GENDER =
   "id, role, name, country, dob, age, sport, sport_detail, social, socials, brand_category, website, logo_url, photo_url";
 
 const PROFILE_PUBLIC_SELECT_NO_PHOTO =
@@ -38,6 +42,7 @@ export type ProfileBody = {
   name?: string;
   country?: string;
   dob?: string;
+  gender?: string;
   sport?: string;
   sport_detail?: string | null;
   socials?: unknown;
@@ -62,6 +67,16 @@ export async function loadProfileRow(
     .maybeSingle();
   if (!full.error) {
     return (full.data as ProfileFields | null) ?? null;
+  }
+  if (isMissingColumn(full.error, "gender")) {
+    const withoutGender = await supabase
+      .from("profiles")
+      .select(PROFILE_PUBLIC_SELECT_NO_GENDER)
+      .eq("id", userId)
+      .maybeSingle();
+    if (!withoutGender.error) {
+      return (withoutGender.data as ProfileFields | null) ?? null;
+    }
   }
   if (isMissingColumn(full.error, "photo_url")) {
     const withoutPhoto = await supabase
@@ -150,6 +165,7 @@ export async function saveSessionProfile(
     role?: string | null;
     country?: string | null;
     dob?: string | null;
+    gender?: string | null;
     photo_url?: string | null;
     logo_url?: string | null;
   } | null,
@@ -182,6 +198,10 @@ export async function saveSessionProfile(
     if (!isAdultDob(dob)) {
       return { ok: false, status: 400, error: "Athletes must be 18 or older." };
     }
+    const gender = (body.gender ?? existing?.gender ?? "").trim();
+    if (!isAthleteGender(gender)) {
+      return { ok: false, status: 400, error: "Pick a gender." };
+    }
     const parsedSport = parseAthleteSport(body.sport, body.sport_detail);
     if (!parsedSport.ok) {
       return { ok: false, status: 400, error: parsedSport.error };
@@ -211,6 +231,7 @@ export async function saveSessionProfile(
       name,
       country,
       dob,
+      gender,
       sport: parsedSport.sport,
       sport_detail: parsedSport.sport_detail,
       social: firstSocial
@@ -328,6 +349,18 @@ async function writeProfileRow(
       : await supabase
           .from("profiles")
           .insert({ ...withoutAge, id: userId })
+          .select("id")
+          .maybeSingle();
+  }
+
+  if (result.error && isMissingColumn(result.error, "gender")) {
+    const { gender: _gender, ...withoutGender } = row;
+    void _gender;
+    result = hasRow
+      ? await update(withoutGender)
+      : await supabase
+          .from("profiles")
+          .insert({ ...withoutGender, id: userId })
           .select("id")
           .maybeSingle();
   }

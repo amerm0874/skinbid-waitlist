@@ -3,12 +3,14 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ATHLETE_GENDERS,
   BRAND_CATEGORIES,
   PAYOUT_ACCOUNT_MAX,
   PAYOUT_RAIL,
   dobInputBounds,
   initialSportDetail,
   isAdultDob,
+  isAthleteGender,
   isAthleteSport,
   isBrandCategory,
   looksLikeEmail,
@@ -90,6 +92,9 @@ export default function OnboardingForm({
     const saved = profile?.dob?.slice(0, 10) ?? "";
     return /^\d{4}-\d{2}-\d{2}$/.test(saved) ? saved : "";
   });
+  const [gender, setGender] = useState(
+    isAthleteGender(profile?.gender) ? profile.gender : "",
+  );
   const [sport, setSport] = useState(
     isAthleteSport(profile?.sport) ? profile.sport : "",
   );
@@ -138,6 +143,9 @@ export default function OnboardingForm({
     }
     if (!isAdultDob(dob)) {
       return "Athletes must be 18 or older.";
+    }
+    if (!isAthleteGender(gender)) {
+      return "Pick a gender.";
     }
     const parsedSport = parseAthleteSport(sport, sportDetail);
     if (!parsedSport.ok) {
@@ -195,6 +203,7 @@ export default function OnboardingForm({
           name: name.trim(),
           country: role === "athlete" ? country.trim() : "",
           dob: role === "athlete" ? dob : "",
+          gender: role === "athlete" ? gender : "",
           sport: role === "athlete" ? sport : "",
           sport_detail: role === "athlete" ? sportDetail : null,
           socials: role === "athlete" ? accounts : [],
@@ -323,6 +332,26 @@ export default function OnboardingForm({
             <span className="mt-2 block text-[12px] text-muted">
               18 or older.
             </span>
+          </label>
+          <label className="mt-4 block">
+            <span className="field-label">Gender</span>
+            <select
+              className="field"
+              name="gender"
+              autoComplete="off"
+              required
+              value={gender}
+              onChange={(event) => setGender(event.target.value)}
+            >
+              <option value="" disabled>
+                Select gender
+              </option>
+              {ATHLETE_GENDERS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
           <SportFields
             sport={sport}
