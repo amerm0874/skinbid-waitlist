@@ -11,7 +11,6 @@ import {
 } from "react";
 import EventHud from "@/components/landing/EventHud";
 import SlotPitchCard from "@/components/landing/SlotPitchCard";
-import WaitlistModal from "@/components/waitlist/WaitlistModal";
 import { DEMO_ATHLETES, SLOT_LABELS, type Gender, type SlotId } from "@/lib/demo-landing";
 import {
   DRACO_PATH,
@@ -226,7 +225,6 @@ export default function BodyViewerSection() {
     center: { x: 0, y: 0.85, z: 0 },
   });
   const [slotsOpen, setSlotsOpen] = useState(false);
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [overSlot, setOverSlot] = useState(false);
 
   activeSlotRef.current = activeSlot;
@@ -281,13 +279,11 @@ export default function BodyViewerSection() {
   }
 
   function closeSlot() {
-    setWaitlistOpen(false);
     setActiveSlot(undefined);
   }
 
   function openSlotsList() {
     setActiveSlot(undefined);
-    setWaitlistOpen(false);
     setSlotsOpen(true);
     console.log("Advertise your brand opened slots");
   }
@@ -299,14 +295,13 @@ export default function BodyViewerSection() {
   function pickGender(next: Gender) {
     setActiveSlot(undefined);
     setSlotsOpen(false);
-    setWaitlistOpen(false);
     setModelLoaded(false);
     setSelected(next);
   }
 
-  // Escape closes whichever panel is open. The waitlist popup handles Escape itself.
+  // Escape closes whichever panel is open.
   useEffect(() => {
-    if (waitlistOpen || (!activeSlot && !slotsOpen)) {
+    if (!activeSlot && !slotsOpen) {
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
@@ -317,7 +312,7 @@ export default function BodyViewerSection() {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeSlot, slotsOpen, waitlistOpen]);
+  }, [activeSlot, slotsOpen]);
 
   // Keep the chosen muscle facing the camera. This is on the element
   // attributes too, so a React re-render cannot snap back to the chest.
@@ -526,9 +521,6 @@ export default function BodyViewerSection() {
   }
 
   function onBodyPointerMove(event: ReactPointerEvent) {
-    if (waitlistOpen) {
-      return;
-    }
     const start = pointerRef.current;
     if (start.down) {
       const dx = event.clientX - start.x;
@@ -543,7 +535,7 @@ export default function BodyViewerSection() {
   function onBodyPointerUp(event: ReactPointerEvent) {
     const wasDrag = pointerRef.current.dragged;
     pointerRef.current.down = false;
-    if (waitlistOpen || wasDrag) {
+    if (wasDrag) {
       return;
     }
     const slot = slotAtPoint(event.clientX, event.clientY);
@@ -645,18 +637,10 @@ export default function BodyViewerSection() {
             onPointerMove={onBodyPointerMove}
             onPointerUp={onBodyPointerUp}
             onPointerLeave={onBodyPointerLeave}
-            className={
-              overSlot && !waitlistOpen ? "is-over-slot" : undefined
-            }
+            className={overSlot ? "is-over-slot" : undefined}
             style={{
               backgroundColor: STUDIO,
-              cursor: waitlistOpen
-                ? "default"
-                : overSlot
-                  ? "pointer"
-                  : cameraIdle
-                    ? "grab"
-                    : "default",
+              cursor: overSlot ? "pointer" : cameraIdle ? "grab" : "default",
             }}
           />
 
@@ -667,16 +651,10 @@ export default function BodyViewerSection() {
                 "Slot"
               }
               onClose={closeSlot}
-              onJoinWaitlist={() => setWaitlistOpen(true)}
             />
           ) : null}
         </div>
       </div>
-      <WaitlistModal
-        open={waitlistOpen}
-        onClose={() => setWaitlistOpen(false)}
-        slot={activeSlot}
-      />
     </section>
   );
 }
