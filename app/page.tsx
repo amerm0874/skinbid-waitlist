@@ -21,7 +21,7 @@ const STEPS = [
   {
     n: "01",
     title: "List the event",
-    body: "Date, photo, slots. Any sport. You close zones you cannot sell.",
+    body: "Date, photo, slots. Any sport. You close slots you cannot sell.",
   },
   {
     n: "02",
@@ -31,7 +31,7 @@ const STEPS = [
   {
     n: "03",
     title: "Wear it on the day",
-    body: "Temp tattoo in the bought zone. One day. Then it comes off.",
+    body: "Temp tattoo in the bought slot. One day. Then it comes off.",
   },
   {
     n: "04",
@@ -75,16 +75,23 @@ export default function LandingPage() {
               List logo slots on your body. Brands pay SkinBid. You wear a temp
               tattoo for one day.
             </p>
-            <div className="mt-6">
+            <div className="mt-6 flex flex-wrap gap-3">
               <a href="/signup?role=athlete" className="press-btn">
                 <span className="press-btn-plate" aria-hidden="true" />
-                <span className="press-btn-face">Get started</span>
+                <span className="press-btn-face">List my race</span>
+              </a>
+              <a href="/signup?role=brand" className="press-btn">
+                <span className="press-btn-plate" aria-hidden="true" />
+                <span className="press-btn-face">Advertise my brand</span>
               </a>
             </div>
           </div>
           <HeroBody />
         </div>
         <ChampionshipTicker />
+        <p className="site-wrap pb-4 text-[12px] leading-4 text-muted">
+          Not affiliated with these events.
+        </p>
       </section>
 
       <BodyViewerSection />
@@ -92,7 +99,7 @@ export default function LandingPage() {
       <section id="how" className="border-t border-line">
         <div className="site-wrap py-[var(--block-y)]">
           <h2 className="display text-[36px] md:text-[52px]">
-            Four steps. No decks.
+            Four steps. No pitch deck.
           </h2>
           <ol className="mt-10 grid gap-0 md:grid-cols-4">
             {STEPS.map((step) => (
@@ -113,19 +120,16 @@ export default function LandingPage() {
               href={MARC_LOU_POST}
               target="_blank"
               rel="noopener noreferrer"
-              className="press-btn credit-btn"
+              className="flex items-center gap-3 text-[13px] leading-5 text-muted hover:text-ink"
             >
-              <span className="press-btn-plate" aria-hidden="true" />
-              <span className="press-btn-face">
-                <img
-                  src="/landing/marclou.jpg"
-                  alt=""
-                  width={40}
-                  height={40}
-                  className="credit-btn-photo"
-                />
-                Inspired by Marc Lou&apos;s post
-              </span>
+              <img
+                src="/landing/marclou.jpg"
+                alt=""
+                width={40}
+                height={40}
+                className="credit-btn-photo"
+              />
+              Inspired by Marc Lou&apos;s post
             </a>
           </div>
         </div>

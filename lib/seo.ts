@@ -10,18 +10,23 @@ export function formatEventDate(iso: string) {
 }
 
 export function openZoneLabel(count: number) {
-  return count === 1 ? "1 zone open" : `${count} zones open`;
+  return count === 1 ? "1 slot open" : `${count} slots open`;
 }
 
-export function athletePageTitle(name: string) {
-  return `${name} — event-day body slots | ${SITE.name}`;
+export function athletePageTitle(name: string, eventName?: string | null) {
+  const race = eventName?.trim();
+  if (race) {
+    return `${name} · ${race} | ${SITE.name}`;
+  }
+  return `${name} | ${SITE.name}`;
 }
 
 export function eventPageTitle(name: string, eventName: string, dateIso: string) {
   return `${name} · ${eventName} · ${formatEventDate(dateIso)} | ${SITE.name}`;
 }
 
-export const EVENTS_INDEX_TITLE = `Live body-slot events | ${SITE.name}`;
+export const EVENTS_INDEX_TITLE = `Events | ${SITE.name}`;
+export const ATHLETES_INDEX_TITLE = `Athletes | ${SITE.name}`;
 
 export function racePageTitle(name: string, dateLabel: string) {
   return `${name} · ${dateLabel} | ${SITE.name}`;
@@ -43,17 +48,19 @@ export function athletePageDescription(input: {
   dateIso: string | null;
 }) {
   if (input.eventName && input.dateIso) {
-    return `${input.name} lists ${input.eventName} on ${formatEventDate(input.dateIso)}. Brands bid on body zones.`;
+    return `${input.name} lists ${input.eventName} on ${formatEventDate(input.dateIso)}. Brands bid on body slots.`;
   }
-  return `${input.name} lists event-day body slots on SkinBid. Brands bid on body zones.`;
+  return `${input.name} lists race-day slots on SkinBid. Brands bid on body slots.`;
 }
 
 export function eventPageDescription(name: string, eventName: string, dateIso: string) {
-  return `${name} lists ${eventName} on ${formatEventDate(dateIso)}. Brands bid on body zones.`;
+  return `${name} lists ${eventName} on ${formatEventDate(dateIso)}. Brands bid on body slots.`;
 }
 
 export const EVENTS_INDEX_DESCRIPTION =
-  "Live events where brands bid on body zones for one-day temp marks.";
+  "Upcoming races on SkinBid. Brands bid from $100. Auction closes 48 hours before the race.";
+export const ATHLETES_INDEX_DESCRIPTION =
+  "Live athletes on SkinBid. Brands bid from $100. Auction closes 48 hours before the race.";
 
 export function shareMetadata(
   title: string,

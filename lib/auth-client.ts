@@ -4,6 +4,11 @@ import {
   INTENDED_ROLE_KEY,
   type Role,
 } from "@/lib/config";
+import {
+  authReturnCookieHeader,
+  googleCallbackUrl,
+  publicAuthOrigin,
+} from "@/lib/auth-return";
 import { safeReturnPath } from "@/lib/launch";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 
@@ -14,6 +19,21 @@ export function rememberIntendedRole(role?: Role | null) {
     window.localStorage.setItem(INTENDED_ROLE_KEY, role);
   } else {
     window.localStorage.removeItem(INTENDED_ROLE_KEY);
+  }
+}
+
+function oauthOrigin() {
+  return publicAuthOrigin(window.location.hostname, window.location.origin);
+}
+
+export function rememberAuthReturn(role?: Role | null, next?: string | null) {
+  rememberIntendedRole(role);
+  for (const line of authReturnCookieHeader(
+    role,
+    next,
+    window.location.hostname,
+  )) {
+    document.cookie = line;
   }
 }
 
@@ -39,7 +59,7 @@ export function authErrorCopy(message: string) {
     return "Wrong email or password.";
   }
   if (lower.includes("email not confirmed")) {
-    return "Confirm your email first, or use the login link below.";
+    return "Confirm your email first.";
   }
   if (
     lower.includes("already registered") ||
@@ -61,11 +81,15 @@ export async function continueWithGoogle(
   if (!supabase) {
     return "Auth is not configured yet.";
   }
-  rememberIntendedRole(role);
+  rememberAuthReturn(role, next);
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: authCallbackHref(window.location.origin, role, next),
+      redirectTo: googleCallbackUrl(oauthOrigin()),
+      queryParams: {
+        prompt: "select_account",
+        access_type: "offline",
+      },
     },
   });
   if (error) {
@@ -84,12 +108,12 @@ export async function sendLoginLink(
   if (!supabase) {
     return "Auth is not configured yet.";
   }
-  rememberIntendedRole(role);
+  rememberAuthReturn(role, next);
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
       shouldCreateUser: true,
-      emailRedirectTo: authCallbackHref(window.location.origin, role, next),
+      emailRedirectTo: authCallbackHref(oauthOrigin(), role, next),
     },
   });
   if (error) {
@@ -100,5 +124,49 @@ export async function sendLoginLink(
 }
 
 export function goThroughAuthCallback(role?: Role | null, next?: string | null) {
-  window.location.assign(authCallbackHref(window.location.origin, role, next));
+  rememberAuthReturn(role, next);
+  window.location.assign(authCallbackHref(oauthOrigin(), role, next));
+}
+
+export function clearAuthReturn() {
+  rememberAuthReturn(null, null);
+}
+
+export function clearBrowserAuth() {
+  try {
+    window.localStorage.removeItem(INTENDED_ROLE_KEY);
+    for (const store of [window.localStorage, window.sessionStorage]) {
+      const keys = [];
+      for (let index = 0; index < store.length; index += 1) {
+        const key = store.key(index);
+        if (key) {
+          keys.push(key);
+        }
+      }
+      for (const key of keys) {
+        if (key.startsWith("sb-") || key.toLowerCase().includes("supabase")) {
+          store.removeItem(key);
+        }
+      }
+    }
+  } catch {
+    // Private browsing. Cookies below still drop the session.
+  }
+
+  const cookies = document.cookie.split(";");
+  for (const raw of cookies) {
+    const name = raw.split("=")[0]?.trim();
+    if (!name) {
+      continue;
+    }
+    if (
+      name.startsWith("sb-") ||
+      name.includes("auth-token") ||
+      name === "skinbid_auth_next" ||
+      name === "skinbid_auth_role"
+    ) {
+      document.cookie = `${name}=; Max-Age=0; path=/`;
+      document.cookie = `${name}=; Max-Age=0; path=/; domain=.skinbid.me`;
+    }
+  }
 }

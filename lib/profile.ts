@@ -7,7 +7,7 @@ import {
   looksLikeEmail,
   parseAthleteSport,
   parseRole,
-  pathAfterProfile,
+  destinationAfterAuth,
   PAYOUT_RAIL,
   type BrandCategory,
 } from "@/lib/config";
@@ -52,6 +52,7 @@ export type ProfileBody = {
   photo_url?: string | null;
   paypal_email?: string;
   stay?: boolean;
+  next?: string | null;
 };
 
 type ProfileFields = Omit<Profile, "payout_rail" | "payout_account">;
@@ -290,19 +291,23 @@ export async function saveSessionProfile(
       : { payout_rail: null, payout_account: null };
   const next = body.stay
     ? "/settings"
-    : pathAfterProfile({
+    : destinationAfterAuth(
+        {
+          role,
+          name,
+          dob: typeof row.dob === "string" ? row.dob : null,
+          age: typeof row.age === "number" ? row.age : null,
+          sport: typeof row.sport === "string" ? row.sport : null,
+          sport_detail:
+            typeof row.sport_detail === "string" ? row.sport_detail : null,
+          website: typeof row.website === "string" ? row.website : null,
+          brand_category:
+            typeof row.brand_category === "string" ? row.brand_category : null,
+          ...payout,
+        },
         role,
-        name,
-        dob: typeof row.dob === "string" ? row.dob : null,
-        age: typeof row.age === "number" ? row.age : null,
-        sport: typeof row.sport === "string" ? row.sport : null,
-        sport_detail:
-          typeof row.sport_detail === "string" ? row.sport_detail : null,
-        website: typeof row.website === "string" ? row.website : null,
-        brand_category:
-          typeof row.brand_category === "string" ? row.brand_category : null,
-        ...payout,
-      });
+        typeof body.next === "string" ? body.next : null,
+      );
 
   return { ok: true, next };
 }

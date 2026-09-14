@@ -1,18 +1,18 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { getSessionUser } from "@/lib/auth";
 import { sessionGateRedirect } from "@/lib/config";
-import { loadLiveSlotCards } from "@/lib/live-listings";
-import { loadAllUpcomingOfficialEvents } from "@/lib/official-events";
+import { groupLiveRaces, loadLiveSlotCards } from "@/lib/live-listings";
 import {
   EVENTS_INDEX_DESCRIPTION,
   EVENTS_INDEX_TITLE,
   shareMetadata,
 } from "@/lib/seo";
-import { EventsCatalog } from "@/components/product/EventsCatalog";
-import { LiveSlotCard } from "@/components/product/LiveSlotCard";
+import { EmptyState } from "@/components/product/EmptyState";
 import { ProductShell } from "@/components/product/ProductShell";
+import { RaceListRow } from "@/components/product/RaceMeet";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = shareMetadata(
   EVENTS_INDEX_TITLE,
@@ -27,41 +27,31 @@ export default async function EventsPage() {
     redirect(gate);
   }
 
-  // Saved og_image only. Never scrape official race sites here.
-  const [events, races] = await Promise.all([
-    loadLiveSlotCards(supabase),
-    loadAllUpcomingOfficialEvents(supabase),
-  ]);
+  const races = groupLiveRaces(await loadLiveSlotCards(supabase));
 
   return (
     <ProductShell email={user?.email} role={profile?.role}>
       <div className="page-stack">
-        {events.length > 0 ? (
-          <section>
-            <div className="slot-board-head">
-              <h1 className="slot-board-kicker">Live athletes</h1>
-              {profile?.role === "athlete" ? (
-                <Link href="/new" className="slot-board-action">
-                  List
-                </Link>
-              ) : null}
-            </div>
-            <ul className="live-body-list">
-              {events.map((event, index) => (
-                <li key={event.id}>
-                  <LiveSlotCard card={event} eager={index < 2} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        <EventsCatalog
-          races={races}
-          live={events}
-          asTitle={events.length === 0}
-          hasLiveBodies={events.length > 0}
-        />
+        {races.length > 0 ? (
+          <ul className="race-meet-list">
+            {races.map((race) => (
+              <li key={race.key}>
+                <RaceListRow
+                  href={race.href}
+                  name={race.name}
+                  city={race.city}
+                  date={race.date}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState
+            line="No races listed yet."
+            href={profile?.role === "athlete" ? "/new" : "/signup?role=athlete"}
+            linkLabel="Be first"
+          />
+        )}
       </div>
     </ProductShell>
   );

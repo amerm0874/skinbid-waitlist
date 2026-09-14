@@ -13,3 +13,8 @@ export function nextBidCents(currentHeldCents: number | null) {
   }
   return currentHeldCents + BID_STEP_CENTS;
 }
+
+// First ask is $100. Occupied zone is current + $100. Matches Whop.
+export function advertisePriceLabel(currentHeldCents: number | null) {
+  return centsToUsd(nextBidCents(currentHeldCents));
+}

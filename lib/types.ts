@@ -47,6 +47,8 @@ export type EventRow = {
   status: EventStatus;
   likeness_opt_in: boolean;
   appearance_price_cents: number | null;
+  offer_tattoo?: boolean;
+  offer_sticker?: boolean;
 };
 
 export type ZoneRow = {
@@ -65,8 +67,23 @@ export type BidRow = {
   dodo_checkout_id: string | null;
   polar_checkout_id: string | null;
   polar_order_id: string | null;
+  whop_checkout_id: string | null;
+  whop_payment_id: string | null;
   status: BidStatus;
   payable: boolean;
+  logo_url?: string | null;
+  mark_kind?: "tattoo" | "sticker" | null;
+  post_rules?: string | null;
+};
+
+export type CaptureRow = {
+  id: string;
+  athlete_id: string;
+  paths: string[];
+  status: "pending" | "uploaded" | "processing" | "ready" | "failed";
+  model_paid: boolean;
+  whop_payment_id: string | null;
+  created_at: string;
 };
 
 export type ProofRow = {

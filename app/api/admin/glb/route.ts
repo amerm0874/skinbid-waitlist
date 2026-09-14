@@ -153,5 +153,6 @@ export async function POST(request: Request) {
   revalidatePath("/events");
   revalidatePath(`/e/${live.slug}`);
   revalidatePath("/e/[slug]", "page");
+  revalidatePath("/a/[handle]", "page");
   return NextResponse.json({ slug: live.slug, status: "live" });
 }

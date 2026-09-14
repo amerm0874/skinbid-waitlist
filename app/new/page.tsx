@@ -9,6 +9,7 @@ import {
   onboardingPath,
   sessionGateRedirect,
 } from "@/lib/config";
+import { loadCaptureState } from "@/lib/capture-state";
 import {
   demoteLiveWithoutReadyGlb,
   isReadyAvatar,
@@ -51,6 +52,7 @@ export default async function NewEventPage({
   let existing: ListedEvent | null = null;
   let avatarReady = false;
   let scanUploaded = false;
+  let modelPaid = false;
 
   if (supabase) {
     const { data: rows } = await supabase
@@ -72,15 +74,9 @@ export default async function NewEventPage({
       .maybeSingle();
     avatarReady = isReadyAvatar(avatar);
 
-    const { data: capture } = await supabase
-      .from("captures")
-      .select("id")
-      .eq("athlete_id", user.id)
-      .eq("status", "uploaded")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    scanUploaded = Boolean(capture);
+    const captureState = await loadCaptureState(supabase, user.id);
+    scanUploaded = captureState.scanUploaded;
+    modelPaid = captureState.modelPaid;
 
     if (existing?.status === "live" && !avatarReady) {
       await demoteLiveWithoutReadyGlb(supabase, user.id);
@@ -95,17 +91,17 @@ export default async function NewEventPage({
 
   const heading =
     existing?.status === "live"
-      ? "Event is live"
+      ? "Event is public"
       : existing?.status === "draft"
-        ? "Scan required"
-        : "List one event";
+        ? "Scan your body"
+        : "List a race";
 
   const lead =
     existing?.status === "live"
-      ? "One live event at a time. Brands bid on the twelve named zones."
+      ? "One event at a time. Brands bid on the twelve body slots."
       : existing?.status === "draft"
-        ? "Upload the orbit and name clip. We build the GLB. Until a .glb is ready this event stays draft and is not listed on /events or /e/[slug]."
-        : "Pick an official event for your sport, or type a custom name. Date (4 days to 12 months out), country, city, event link, likeness. Twelve zones start open. You can close any of them.";
+        ? "Scan your body. Until the 3D body is ready, this listing is not public."
+        : "Pick an official race for your sport, or type a custom name. Date (4 days to 12 months out), country, city, event link, likeness. Twelve slots start open. You can close any of them.";
 
   return (
     <ProductShell email={user.email} role={profile.role}>
@@ -118,6 +114,7 @@ export default async function NewEventPage({
           userId={user.id}
           avatarReady={avatarReady}
           scanUploaded={scanUploaded}
+          modelPaid={modelPaid}
           existing={existing}
           profileCountry={profile.country}
           profileSport={profile.sport}

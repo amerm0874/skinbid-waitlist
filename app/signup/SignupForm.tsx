@@ -8,21 +8,23 @@ import {
   continueWithGoogle,
   goThroughAuthCallback,
   PASSWORD_MIN,
-  rememberIntendedRole,
+  rememberAuthReturn,
 } from "@/lib/auth-client";
 import {
   loginPath,
   looksLikeEmail,
   type Role,
 } from "@/lib/config";
-import { createBrowserSupabase, googleAuthEnabled } from "@/lib/supabase/client";
+import { captureEvent, identifyUser } from "@/lib/analytics";
+import { createBrowserSupabase } from "@/lib/supabase/client";
+import { ContinueWithGoogle } from "@/components/product/ContinueWithGoogle";
 
 export default function SignupForm({
   role,
-  showGoogle,
+  next,
 }: {
   role?: Role | null;
-  showGoogle: boolean;
+  next?: string | null;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -55,12 +57,12 @@ export default function SignupForm({
     }
 
     setBusy("password");
-    rememberIntendedRole(role);
+    rememberAuthReturn(role, next);
     const { data, error } = await supabase.auth.signUp({
       email: trimmed,
       password,
       options: {
-        emailRedirectTo: authCallbackHref(window.location.origin, role),
+        emailRedirectTo: authCallbackHref(window.location.origin, role, next),
       },
     });
     setBusy(null);
@@ -71,20 +73,27 @@ export default function SignupForm({
       return;
     }
 
+    if (role) {
+      captureEvent("signup_role", { role });
+    }
+
     if (!data.session) {
       console.log("Sign up needs email confirm", role ?? "no role");
       setMessage(`Check ${trimmed} to confirm your account.`);
       return;
     }
 
+    if (data.session.user) {
+      identifyUser(data.session.user.id, role);
+    }
     console.log("Signed up", role ?? "no role");
-    goThroughAuthCallback(role);
+    goThroughAuthCallback(role, next);
   }
 
   async function handleGoogle() {
     setMessage("");
     setBusy("google");
-    const error = await continueWithGoogle(role);
+    const error = await continueWithGoogle(role, next);
     setBusy(null);
     if (error) {
       setMessage(error);
@@ -93,7 +102,15 @@ export default function SignupForm({
 
   return (
     <div className="form-shell">
-      <form onSubmit={handleSubmit}>
+      <ContinueWithGoogle
+        busy={busy === "google"}
+        disabled={busy !== null}
+        onClick={() => void handleGoogle()}
+      />
+
+      <p className="mt-5 text-[13px] text-muted">or email</p>
+
+      <form onSubmit={handleSubmit} className="mt-4">
         <label className="block">
           <span className="field-label">Email</span>
           <input
@@ -135,26 +152,15 @@ export default function SignupForm({
         <button
           type="submit"
           disabled={busy !== null}
-          className="btn btn-solid mt-5"
+          className="btn btn-outline mt-5"
         >
           {busy === "password" ? "Creating…" : "Create account"}
         </button>
       </form>
 
       <p className="mt-4 text-[14px] text-muted">
-        Already have an account? <Link href={loginPath(role)}>Log in</Link>
+        Already have an account? <Link href={loginPath(role, next)}>Log in</Link>
       </p>
-
-      {showGoogle && googleAuthEnabled() ? (
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={handleGoogle}
-          className="btn btn-ghost mt-5 w-full"
-        >
-          {busy === "google" ? "Opening Google…" : "Continue with Google"}
-        </button>
-      ) : null}
 
       {message ? <p className="mt-4 text-[14px] text-muted">{message}</p> : null}
     </div>

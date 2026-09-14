@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 import { SITE } from "@/lib/config";
+import { PostHogProvider } from "./providers";
 import "./globals.css";
 
 const inter = Inter({
@@ -60,7 +61,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${inter.variable} ${bebasNeue.variable} ${chakraPetch.variable} h-full`}
     >
       <body className="min-h-full bg-bg font-sans text-ink antialiased">
-        {children}
+        <PostHogProvider>{children}</PostHogProvider>
         {/* Counts visits after you deploy to Vercel. Does nothing in local dev. */}
         <Analytics />
         {plausibleDomain ? (

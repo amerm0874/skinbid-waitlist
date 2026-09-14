@@ -27,10 +27,75 @@ export function eventDateWindowError(dateIso: string, now = new Date()) {
   return null;
 }
 
+export function parseEventStart(iso: string | null | undefined) {
+  const raw = iso?.trim() ?? "";
+  if (!raw) {
+    return null;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatEventStartLabel(iso: string | null | undefined) {
+  const start = parseEventStart(iso);
+  if (!start) {
+    return iso?.trim() || "—";
+  }
+  return start.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatAuctionRemain(remainMs: number) {
+  const remain = Math.max(0, remainMs);
+  const days = Math.floor(remain / 86_400_000);
+  const hours = Math.floor((remain % 86_400_000) / 3_600_000);
+  const mins = Math.floor((remain % 3_600_000) / 60_000);
+  const secs = Math.floor((remain % 60_000) / 1000);
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(mins).padStart(2, "0");
+  const ss = String(secs).padStart(2, "0");
+  return days > 0 ? `${days}d ${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}`;
+}
+
+export type ClockPart = { n: number; u: string };
+
+function splitRemain(remainMs: number) {
+  const remain = Math.max(0, remainMs);
+  return {
+    days: Math.floor(remain / 86_400_000),
+    hours: Math.floor((remain % 86_400_000) / 3_600_000),
+    mins: Math.floor((remain % 3_600_000) / 60_000),
+    secs: Math.floor((remain % 60_000) / 1000),
+  };
+}
+
+// Close clock: event start minus 48h. Not a fake days-out.
+export function countdownParts(eventDateIso: string, now: number): ClockPart[] {
+  const close = auctionClosesAt(eventDateIso);
+  const remain = Number.isNaN(close.getTime())
+    ? 0
+    : Math.max(0, close.getTime() - now);
+  const { days, hours, mins, secs } = splitRemain(remain);
+  const parts = days > 0 ? [{ n: days, u: "d" }] : [];
+  parts.push(
+    { n: hours, u: "h" },
+    { n: mins, u: "m" },
+    { n: secs, u: "s" },
+  );
+  return parts;
+}
+
 export function auctionClosesAt(eventDateIso: string) {
-  const close = new Date(eventDateIso);
-  close.setHours(close.getHours() - AUCTION_CLOSE_HOURS);
-  return close;
+  const start = parseEventStart(eventDateIso);
+  if (!start) {
+    return new Date(Number.NaN);
+  }
+  return new Date(start.getTime() - AUCTION_CLOSE_HOURS * 60 * 60 * 1000);
 }
 
 export function isAuctionOpen(eventDateIso: string, now = new Date()) {
@@ -39,7 +104,35 @@ export function isAuctionOpen(eventDateIso: string, now = new Date()) {
 
 // Close bidding when now > event_start - 48 hours.
 export function isAuctionClosed(eventDateIso: string, now = new Date()) {
-  return now.getTime() > auctionClosesAt(eventDateIso).getTime();
+  const close = auctionClosesAt(eventDateIso);
+  if (Number.isNaN(close.getTime())) {
+    return false;
+  }
+  return now.getTime() > close.getTime();
+}
+
+export type AuctionClockKind = "demo" | "date" | "pending" | "closed" | "countdown";
+
+export function auctionClockView(
+  eventDateIso: string | null | undefined,
+  now: number | null,
+  options?: { demo?: boolean },
+): { kind: AuctionClockKind; label: string } {
+  if (options?.demo) {
+    return { kind: "demo", label: "Demo" };
+  }
+  const start = parseEventStart(eventDateIso);
+  if (!start) {
+    return { kind: "date", label: formatEventStartLabel(eventDateIso) };
+  }
+  if (now == null) {
+    return { kind: "pending", label: "—" };
+  }
+  const remain = auctionClosesAt(eventDateIso ?? "").getTime() - now;
+  if (remain <= 0) {
+    return { kind: "closed", label: "Closed" };
+  }
+  return { kind: "countdown", label: formatAuctionRemain(remain) };
 }
 
 // No end timestamp on the listing. Treat the start day's last millisecond as the end.
@@ -73,6 +166,7 @@ const RESERVED_SLUGS = new Set([
   "inbox",
   "proof",
   "me",
+  "athletes",
   "api",
   "auth",
 ]);

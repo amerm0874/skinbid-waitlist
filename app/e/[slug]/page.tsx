@@ -2,11 +2,19 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isAuctionClosed } from "@/lib/auction";
 import { getSessionUser } from "@/lib/auth";
-import { brandOnboardingComplete } from "@/lib/config";
+import {
+  brandOnboardingComplete,
+  canAdvertiseOnEvent,
+  loginPath,
+  onboardingPath,
+} from "@/lib/config";
 import { closeEventAuction } from "@/lib/close-auctions";
 import { DEMO_EVENT, DEMO_GLB, DEMO_SLUG } from "@/lib/demo-event";
-import { polarPaymentsEnabled } from "@/lib/polar-enabled";
-import { isReadyAvatar } from "@/lib/event-create";
+import { ensureEventZoneRows, isReadyAvatar } from "@/lib/event-create";
+import { loadDemoZoneLogos } from "@/lib/event-logo";
+import { loadBodyPhotos, type BodyPhotos } from "@/lib/body-photos";
+import { publicAthleteHandle } from "@/lib/handle";
+import { createAdminSupabase } from "@/lib/supabase/admin";
 import { loadEventSeo } from "@/lib/public-listings";
 import { isPublishedEventStatus } from "@/lib/types";
 import {
@@ -19,7 +27,8 @@ import { ZONE_NAMES } from "@/lib/zones";
 import { ProductShell } from "@/components/product/ProductShell";
 import EventStage, { type StageZone } from "@/components/product/EventStage";
 import { JsonLd } from "@/components/seo/JsonLd";
-import { loadLastBidsByZone, type ZoneBidItem } from "@/lib/zone-bids";
+import { holdPaidPendingBids } from "@/lib/hold-bid";
+import { loadLastBidsByZone, loadLeadsByZone, type ZoneBidItem } from "@/lib/zone-bids";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -83,17 +92,33 @@ export default async function EventPage({ params }: PageProps) {
   let eventId: string | undefined;
   let athleteId: string | undefined;
   let athleteName = DEMO_EVENT.athlete_name;
+  let athleteHandle: string | null = null;
   let eventName = DEMO_EVENT.name;
-  let eventDate = DEMO_EVENT.date;
+  let eventDate = slug === DEMO_SLUG ? DEMO_EVENT.date : "";
   let eventCity: string | null = DEMO_EVENT.city;
   let glbUrl = "";
   let zones: StageZone[] = emptyZones();
   let zoneBids: Record<string, ZoneBidItem[]> = {};
+  let bodyPhotos: BodyPhotos = { front: null, back: null };
   let found = false;
 
   if (slug === DEMO_SLUG) {
     found = true;
     glbUrl = DEMO_GLB;
+    bodyPhotos = { front: "/body/front.jpg", back: "/body/back.jpg" };
+    const demoLogos = await loadDemoZoneLogos();
+    zones = ZONE_NAMES.map((name) => {
+      const logoUrl = demoLogos.get(name) ?? null;
+      return {
+        id: `demo-${name}`,
+        name,
+        status: "open",
+        occupied: Boolean(logoUrl),
+        current_cents: null,
+        brandLabel: logoUrl ? "Demo brand" : null,
+        logoUrl,
+      };
+    });
   } else if (supabase) {
     const { data: event } = await supabase
       .from("events")
@@ -119,6 +144,7 @@ export default async function EventPage({ params }: PageProps) {
       eventDate = event.date;
       eventCity = event.city ?? null;
       glbUrl = avatar.glb_url;
+      bodyPhotos = await loadBodyPhotos(event.athlete_id);
 
       // Settle winners as soon as the page loads past T–48h. Do not wait on cron.
       if (event.status === "live" && isAuctionClosed(event.date)) {
@@ -127,54 +153,42 @@ export default async function EventPage({ params }: PageProps) {
       }
       const { data: athlete } = await supabase
         .from("profiles")
-        .select("name")
+        .select("name, social, socials")
         .eq("id", event.athlete_id)
         .maybeSingle();
-      athleteName = athlete?.name ?? "Athlete";
+      athleteName = athlete?.name?.trim() || "Athlete";
+      athleteHandle = publicAthleteHandle({
+        social: athlete?.social,
+        socials: athlete?.socials,
+        name: athleteName,
+      });
 
+      const admin = createAdminSupabase();
+      if (admin) {
+        await ensureEventZoneRows(admin, event.id);
+      }
       const { data: zoneRows } = await supabase
         .from("zones")
         .select("id, name, status")
         .eq("event_id", event.id);
 
       const zoneIds = (zoneRows ?? []).map((row) => row.id);
-      const { data: bids } = zoneIds.length
-        ? await supabase
-            .from("bids")
-            .select("zone_id, amount_cents, status, brand_id")
-            .in("zone_id", zoneIds)
-            .in("status", ["held", "won"])
-        : { data: [] as Array<{ zone_id: string; amount_cents: number; status: string; brand_id: string }> };
-
-      const heldByZone = new Map<
-        string,
-        { amount_cents: number; brand_id: string; status: "held" | "won" }
-      >();
-      for (const bid of bids ?? []) {
-        if (bid.status !== "held" && bid.status !== "won") {
-          continue;
-        }
-        const current = heldByZone.get(bid.zone_id);
-        if (!current || bid.amount_cents >= current.amount_cents) {
-          heldByZone.set(bid.zone_id, {
-            amount_cents: bid.amount_cents,
-            brand_id: bid.brand_id,
-            status: bid.status,
-          });
-        }
-      }
+      await holdPaidPendingBids(zoneIds);
+      const heldByZone = await loadLeadsByZone(admin ?? supabase, zoneIds);
 
       const brandIds = [...new Set([...heldByZone.values()].map((item) => item.brand_id))];
       const { data: brands } = brandIds.length
         ? await supabase
             .from("profiles")
-            .select("id, name, logo_url")
+            .select("id, name")
             .in("id", brandIds)
-        : { data: [] as Array<{ id: string; name: string | null; logo_url: string | null }> };
+        : { data: [] as Array<{ id: string; name: string | null }> };
       const brandMap = new Map((brands ?? []).map((row) => [row.id, row]));
       const rowByName = new Map((zoneRows ?? []).map((row) => [row.name, row]));
 
-      // Always 12 named zones, even if a row is missing.
+      // Always the named zones, even if a row is missing.
+      // Pad mark is the held PNG only. Profile logos stay off the body.
+      // Outbid drops this URL because that bid is no longer the lead.
       zones = ZONE_NAMES.map((name) => {
         const row = rowByName.get(name);
         const held = row ? heldByZone.get(row.id) : undefined;
@@ -188,7 +202,7 @@ export default async function EventPage({ params }: PageProps) {
           leadStatus: held?.status ?? null,
           brandId: held?.brand_id ?? null,
           brandLabel: brand?.name ?? null,
-          logoUrl: brand?.logo_url ?? null,
+          logoUrl: held?.logo_url ?? null,
         };
       });
       zoneBids = await loadLastBidsByZone(
@@ -201,6 +215,14 @@ export default async function EventPage({ params }: PageProps) {
   if (!found) {
     notFound();
   }
+
+  const isOwner = Boolean(user && athleteId && user.id === athleteId);
+  const canAdvertise = canAdvertiseOnEvent({
+    role: profile?.role ?? null,
+    isOwner,
+    userId: user?.id ?? null,
+    athleteId,
+  });
 
   return (
     <ProductShell email={user?.email} role={profile?.role} flush>
@@ -218,16 +240,21 @@ export default async function EventPage({ params }: PageProps) {
         slug={slug}
         eventId={eventId}
         athleteName={athleteName}
+        athleteHandle={athleteHandle}
         eventName={eventName}
         eventDate={eventDate}
         glbUrl={glbUrl}
+        frontPhotoUrl={bodyPhotos.front}
+        backPhotoUrl={bodyPhotos.back}
         zones={zones}
         canBid={brandOnboardingComplete(profile)}
         role={profile?.role ?? null}
         acceptsBids={Boolean(eventId) && slug !== DEMO_SLUG}
-        paymentsReady={polarPaymentsEnabled()}
-        isOwner={Boolean(user && athleteId && user.id === athleteId)}
-        loginHref={user ? "/onboarding" : "/login"}
+        canAdvertise={canAdvertise}
+        isOwner={isOwner}
+        loginHref={
+          user ? onboardingPath("brand", `/e/${slug}`) : loginPath("brand", `/e/${slug}`)
+        }
         brandName={profile?.role === "brand" ? profile.name : null}
         currentBrandId={profile?.role === "brand" ? profile.id : null}
         brandLogoUrl={profile?.role === "brand" ? profile.logo_url : null}

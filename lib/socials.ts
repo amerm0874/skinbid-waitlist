@@ -139,3 +139,9 @@ export function publicSocialLinks(socials: unknown, social?: string | null) {
     label: `@${row.handle}`,
   }));
 }
+
+export function publicShareSocials(socials: unknown, social?: string | null) {
+  return publicSocialLinks(socials, social).filter(
+    (row) => row.network === "Instagram" || row.network === "X",
+  );
+}

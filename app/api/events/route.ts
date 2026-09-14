@@ -12,6 +12,7 @@ import {
   zoneRows,
   type EventCreateBody,
 } from "@/lib/event-create";
+import { publicAthleteHandle } from "@/lib/handle";
 
 export async function POST(request: Request) {
   const { supabase, user, profile } = await getSessionUser();
@@ -76,6 +77,8 @@ export async function POST(request: Request) {
     status,
     likeness_opt_in: parsed.likeness_opt_in,
     appearance_price_cents: parsed.appearance_price_cents,
+    offer_tattoo: parsed.offer_tattoo,
+    offer_sticker: parsed.offer_sticker,
   };
 
   let insertRow: Record<string, unknown> = eventRow;
@@ -84,7 +87,12 @@ export async function POST(request: Request) {
     .insert(insertRow)
     .select("id, slug, status")
     .single();
-  for (const column of ["sport_detail", "country"] as const) {
+  for (const column of [
+    "sport_detail",
+    "country",
+    "offer_tattoo",
+    "offer_sticker",
+  ] as const) {
     if (!error || !isMissingColumn(error, column)) {
       continue;
     }
@@ -106,7 +114,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // Always spawn the 12 named zones. Default open unless the athlete closed one.
+  // Always spawn the named zones. Default open unless the athlete closed one.
   const { error: zoneError } = await supabase
     .from("zones")
     .insert(zoneRows(event.id, parsed.zones));
@@ -128,6 +136,10 @@ export async function POST(request: Request) {
   if (published) {
     revalidatePath("/events");
     revalidatePath(`/e/${event.slug}`);
+    const handle = publicAthleteHandle(profile);
+    if (handle) {
+      revalidatePath(`/a/${handle}`);
+    }
   }
   return NextResponse.json({
     id: event.id,
@@ -211,5 +223,9 @@ export async function PATCH() {
   revalidatePath("/new");
   revalidatePath("/events");
   revalidatePath(`/e/${event.slug}`);
+  const handle = publicAthleteHandle(profile);
+  if (handle) {
+    revalidatePath(`/a/${handle}`);
+  }
   return NextResponse.json({ slug: event.slug, status: "live" });
 }

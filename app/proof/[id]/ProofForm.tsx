@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { captureEvent } from "@/lib/analytics";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 
 // Phone photos can be large. 12 MB keeps uploads from hanging.
@@ -154,6 +155,7 @@ export default function ProofForm({
       }
 
       console.log("Proof uploaded", eventId);
+      captureEvent("proof_uploaded", { event_id: eventId });
       setSentStatus("pending");
     } catch (error) {
       console.log("Proof upload failed", error);

@@ -1,72 +1,47 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
-import {
-  formatOfficialDate,
-  sportFallbackPhoto,
-  sportPosterKey,
-  storedOgImageUrl,
-} from "@/lib/official-events";
-
-const CARD_WIDTH = 640;
-const CARD_HEIGHT = 480;
+import { formatOfficialDate, storedOgImageUrl } from "@/lib/official-events";
 
 export function RacePoster({
-  sport,
   startsOn,
   photoUrl,
+  name,
   eager = false,
   variant = "hero",
 }: {
-  sport: string;
+  sport?: string;
   startsOn: string;
   photoUrl?: string | null;
+  name: string;
   eager?: boolean;
   variant?: "hero" | "tile";
 }) {
   const official = storedOgImageUrl(photoUrl);
-  const fallback = sportFallbackPhoto(sport);
-  const [officialFailed, setOfficialFailed] = useState(false);
-  const [fallbackFailed, setFallbackFailed] = useState(false);
+  const [photoReady, setPhotoReady] = useState(false);
   const day = startsOn.slice(8, 10);
   const month = formatOfficialDate(startsOn).split(" ")[1] ?? "";
 
   useEffect(() => {
-    setOfficialFailed(false);
+    setPhotoReady(false);
   }, [official]);
 
   const photo = (
-    <div
-      className={
-        official ? "race-poster" : `race-poster is-${sportPosterKey(sport)}`
-      }
-    >
-      {official && !officialFailed ? (
+    <div className="race-poster">
+      <p className="race-poster-fallback-name">{name}</p>
+      {official ? (
         <img
           src={official}
           alt=""
           className="race-poster-photo"
           referrerPolicy="no-referrer"
-          onError={() => setOfficialFailed(true)}
-        />
-      ) : !official && !fallbackFailed ? (
-        <Image
-          src={fallback}
-          alt=""
-          width={CARD_WIDTH}
-          height={CARD_HEIGHT}
-          className="race-poster-photo"
-          sizes={
-            variant === "tile"
-              ? "(min-width: 720px) 720px, 100vw"
-              : eager
-                ? "32rem"
-                : "(min-width: 640px) 50vw, 100vw"
-          }
           loading={eager ? "eager" : "lazy"}
-          priority={eager}
-          onError={() => setFallbackFailed(true)}
+          hidden={!photoReady}
+          onLoad={() => setPhotoReady(true)}
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+            setPhotoReady(false);
+          }}
         />
       ) : null}
     </div>

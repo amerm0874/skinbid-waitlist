@@ -47,8 +47,28 @@ export function catalogDateToLocal(startsOn: string) {
   return `${startsOn}T09:00`;
 }
 
+export function raceClockDate(date: string) {
+  const day = date.trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day) && date.trim().length <= 10) {
+    return catalogDateToLocal(day);
+  }
+  return date;
+}
+
 export function formatOfficialDate(startsOn: string) {
   return parseYmd(startsOn).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+export function formatRaceDay(date: string) {
+  const day = date.trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return formatOfficialDate(day);
+  }
+  return new Date(date).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",

@@ -1,21 +1,27 @@
 "use client";
 
-import type { ModelViewerElement } from "@google/model-viewer";
 import {
-  useCallback,
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { DRACO_PATH, POSTER_SRC } from "@/lib/landing-media";
+import { disposeCageStickers, syncCageStickers } from "@/lib/cage-stickers";
+import { POSTER_SRC } from "@/lib/landing-media";
 import {
   defaultHitForZone,
-  ZONE_HITS,
+  nearestHit,
+  slotWorld,
   type ZoneHit,
 } from "@/lib/zone-views";
 import { type ZoneName } from "@/lib/zones";
+import BodyCanvas, {
+  type BodyCanvasHandle,
+  type BodyFrame,
+  type CameraPose,
+} from "@/components/cage/BodyCanvas";
 
 export type CageZone = {
   name: ZoneName;
@@ -30,58 +36,20 @@ type Props = {
   zones: CageZone[];
   selected: ZoneName | null;
   onSelect: (name: ZoneName) => void;
-};
-
-type BodyFrame = {
-  size: { x: number; y: number; z: number };
-  center: { x: number; y: number; z: number };
-};
-
-type OrbitPose = {
-  theta: number;
-  phi: number;
-  radius: number;
-  target: { x: number; y: number; z: number };
+  lookNonce?: number;
 };
 
 type TurnHandle = {
   cancel: () => void;
 };
 
-type ModelViewerCtor = typeof ModelViewerElement & {
-  dracoDecoderLocation: string;
-};
-
-let modelViewerPromise: Promise<ModelViewerCtor> | null = null;
-
-function ensureModelViewer() {
-  if (!modelViewerPromise) {
-    modelViewerPromise = import(
-      /* webpackPreload: true */
-      "@google/model-viewer"
-    ).then((mod) => {
-      const El = mod.ModelViewerElement as ModelViewerCtor;
-      El.dracoDecoderLocation = DRACO_PATH;
-      return El;
-    });
-  }
-  return modelViewerPromise;
-}
-
-if (typeof window !== "undefined") {
-  void ensureModelViewer();
-}
-
 const TARGET_HEIGHT_M = 1.7;
 const STUDIO = "#111111";
+const FOV_DEG = 34;
+const EXPOSURE = 1.15;
 const HOME_PHI = 75;
 const HOME_RADIUS = 4.15;
-const IDLE_ORBIT_MIN = `auto ${HOME_PHI}deg ${HOME_RADIUS}m`;
-const IDLE_ORBIT_MAX = `auto ${HOME_PHI}deg ${HOME_RADIUS}m`;
-const TRAVEL_ORBIT_MIN = "auto 50deg 2.1m";
-const TRAVEL_ORBIT_MAX = "auto 105deg 6.5m";
 const TURN_MS = 400;
-const SLOT_HIT_M = 0.34;
 
 function cageSrc(glbUrl: string) {
   const url = glbUrl.trim();
@@ -95,21 +63,13 @@ function homeTargetY(frame: BodyFrame) {
   return frame.center.y - frame.size.y / 2 + 0.52 * frame.size.y;
 }
 
-function homePose(frame: BodyFrame): OrbitPose {
+function homePose(frame: BodyFrame): CameraPose {
   return {
     theta: 0,
     phi: HOME_PHI,
     radius: HOME_RADIUS,
     target: { x: 0, y: homeTargetY(frame), z: 0 },
   };
-}
-
-function poseToOrbit(pose: OrbitPose) {
-  return `${pose.theta.toFixed(3)}deg ${pose.phi.toFixed(3)}deg ${pose.radius.toFixed(4)}m`;
-}
-
-function poseToTarget(pose: OrbitPose) {
-  return `${pose.target.x.toFixed(4)}m ${pose.target.y.toFixed(4)}m ${pose.target.z.toFixed(4)}m`;
 }
 
 function easeInOutCubic(t: number) {
@@ -125,66 +85,39 @@ function shortestTheta(from: number, to: number) {
   return from + delta;
 }
 
-function readPose(viewer: ModelViewerElement): OrbitPose {
-  const orbit = viewer.getCameraOrbit();
-  const target = viewer.getCameraTarget();
+function hitCameraPose(hit: ZoneHit, frame: BodyFrame): CameraPose {
+  const world = slotWorld(hit, frame);
+  if (hit.zone === "abs") {
+    return {
+      theta: 0,
+      phi: 78,
+      radius: 2.15,
+      target: { x: 0, y: world.y, z: 0 },
+    };
+  }
+  const lookY = homeTargetY(frame) * 0.35 + world.y * 0.65;
   return {
-    theta: (orbit.theta * 180) / Math.PI,
-    phi: (orbit.phi * 180) / Math.PI,
-    radius: orbit.radius,
-    target: { x: target.x, y: target.y, z: target.z },
+    theta: hit.theta,
+    phi: hit.phi,
+    radius: hit.radius,
+    target: { x: 0, y: lookY, z: 0 },
   };
 }
 
-function applyPose(viewer: ModelViewerElement, pose: OrbitPose) {
-  if (!viewer.isConnected) {
-    return;
-  }
-  viewer.cameraOrbit = poseToOrbit(pose);
-  viewer.cameraTarget = poseToTarget(pose);
-  viewer.jumpCameraToGoal();
-}
-
-function unlockTravel(viewer: ModelViewerElement) {
-  if (!viewer.isConnected) {
-    return;
-  }
-  viewer.minCameraOrbit = TRAVEL_ORBIT_MIN;
-  viewer.maxCameraOrbit = TRAVEL_ORBIT_MAX;
-}
-
-function lockOrbit(viewer: ModelViewerElement, pose: OrbitPose) {
-  if (!viewer.isConnected) {
-    return;
-  }
-  const orbit = poseToOrbit(pose);
-  viewer.minCameraOrbit = orbit;
-  viewer.maxCameraOrbit = orbit;
-  applyPose(viewer, pose);
-}
-
 function turnCamera(
-  viewer: ModelViewerElement,
-  pose: OrbitPose,
-  options: {
-    durationMs: number;
-    lock: boolean;
-    onIdle?: () => void;
-  },
+  canvas: BodyCanvasHandle,
+  pose: CameraPose,
+  options: { durationMs: number },
 ): TurnHandle {
   let raf = 0;
   let cancelled = false;
 
   function finish() {
-    if (cancelled || !viewer.isConnected) {
+    if (cancelled) {
       return;
     }
-    if (options.lock) {
-      lockOrbit(viewer, pose);
-    } else {
-      applyPose(viewer, pose);
-      options.onIdle?.();
-    }
+    canvas.applyPose(pose);
+    canvas.lockVertical(pose);
   }
 
   if (options.durationMs <= 0) {
@@ -196,42 +129,43 @@ function turnCamera(
     };
   }
 
-  unlockTravel(viewer);
-  raf = requestAnimationFrame(() => {
-    raf = requestAnimationFrame(() => {
-      if (cancelled || !viewer.isConnected) {
-        return;
-      }
-      const from = readPose(viewer);
-      const toTheta = shortestTheta(from.theta, pose.theta);
-      const startedAt = performance.now();
+  const from = canvas.readPose();
+  if (!from) {
+    finish();
+    return {
+      cancel() {
+        cancelled = true;
+      },
+    };
+  }
 
-      const tick = (now: number) => {
-        if (cancelled || !viewer.isConnected) {
-          return;
-        }
-        const t = Math.min(1, (now - startedAt) / options.durationMs);
-        const k = easeInOutCubic(t);
-        applyPose(viewer, {
-          theta: lerp(from.theta, toTheta, k),
-          phi: lerp(from.phi, pose.phi, k),
-          radius: lerp(from.radius, pose.radius, k),
-          target: {
-            x: lerp(from.target.x, pose.target.x, k),
-            y: lerp(from.target.y, pose.target.y, k),
-            z: lerp(from.target.z, pose.target.z, k),
-          },
-        });
-        if (t < 1) {
-          raf = requestAnimationFrame(tick);
-        } else {
-          finish();
-        }
-      };
+  canvas.unlockTravel();
+  const toTheta = shortestTheta(from.theta, pose.theta);
+  const startedAt = performance.now();
 
-      raf = requestAnimationFrame(tick);
+  const tick = (now: number) => {
+    if (cancelled) {
+      return;
+    }
+    const t = Math.min(1, (now - startedAt) / options.durationMs);
+    const k = easeInOutCubic(t);
+    canvas.applyPose({
+      theta: lerp(from.theta, toTheta, k),
+      phi: lerp(from.phi, pose.phi, k),
+      radius: lerp(from.radius, pose.radius, k),
+      target: {
+        x: lerp(from.target.x, pose.target.x, k),
+        y: lerp(from.target.y, pose.target.y, k),
+        z: lerp(from.target.z, pose.target.z, k),
+      },
     });
-  });
+    if (t < 1) {
+      raf = requestAnimationFrame(tick);
+    } else {
+      finish();
+    }
+  };
+  raf = requestAnimationFrame(tick);
 
   return {
     cancel() {
@@ -241,125 +175,38 @@ function turnCamera(
   };
 }
 
-function stopViewer(viewer: ModelViewerElement) {
-  try {
-    viewer.pause();
-    viewer.src = "";
-  } catch {
-    // The 3D tag is already gone.
-  }
-}
-
-function slotWorld(hit: ZoneHit, frame: BodyFrame) {
-  return {
-    x: frame.center.x + (hit.x * frame.size.x) / 2,
-    y: frame.center.y - frame.size.y / 2 + hit.y * frame.size.y,
-    z: frame.center.z + (hit.z * frame.size.z) / 2,
-  };
-}
-
-function hitCameraPose(hit: ZoneHit, frame: BodyFrame): OrbitPose {
-  const world = slotWorld(hit, frame);
-  const lookY = homeTargetY(frame) * 0.25 + world.y * 0.75;
-  return {
-    theta: hit.theta,
-    phi: hit.phi,
-    radius: hit.radius,
-    target: {
-      x: world.x * 0.45,
-      y: lookY,
-      z: world.z * 0.18,
-    },
-  };
-}
-
-function nearestHit(frame: BodyFrame, point: { x: number; y: number; z: number }) {
-  let best: ZoneHit | undefined;
-  let bestDist = SLOT_HIT_M;
-  for (const hit of ZONE_HITS) {
-    const pos = slotWorld(hit, frame);
-    const dx = pos.x - point.x;
-    const dy = pos.y - point.y;
-    const dz = pos.z - point.z;
-    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = hit;
-    }
-  }
-  return best;
-}
-
-function freezeViewer(viewer: ModelViewerElement) {
-  if (!viewer.isConnected) {
-    return;
-  }
-  viewer.autoRotate = false;
-  viewer.cameraControls = false;
-  viewer.interactionPrompt = "none";
-}
-
-export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) {
+function EventCage({ glbUrl, zones, selected, onSelect, lookNonce = 0 }: Props) {
   const src = cageSrc(glbUrl);
   const poster = src.includes("avatar-male.glb") ? POSTER_SRC.male : undefined;
-  const viewerRef = useRef<ModelViewerElement | null>(null);
+  const canvasRef = useRef<BodyCanvasHandle | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
-  const bodyFrameRef = useRef<BodyFrame>({
-    size: { x: 0.55, y: 1.7, z: 0.28 },
-    center: { x: 0, y: 0.85, z: 0 },
-  });
-  const scaledFrameRef = useRef<BodyFrame | null>(null);
+  const bodyFrameRef = useRef<BodyFrame | null>(null);
   const pointerRef = useRef({ x: 0, y: 0, dragged: false, down: false });
   const turnRef = useRef<TurnHandle | null>(null);
-  const skipTurnRef = useRef(true);
-  const spinRef = useRef(false);
   const onSelectRef = useRef(onSelect);
+  const selectedRef = useRef(selected);
   const [modelLoaded, setModelLoaded] = useState(false);
-  const [scaledFrame, setScaledFrame] = useState<BodyFrame | null>(null);
   const [overSlot, setOverSlot] = useState(false);
-  const [spin, setSpin] = useState(false);
   const canPick = zones.length > 0;
+  const logoKey = zones
+    .map((zone) => `${zone.name}:${zone.logoUrl ?? ""}`)
+    .join("|");
 
   onSelectRef.current = onSelect;
-  spinRef.current = spin;
-
-  const bindViewer = useCallback((node: ModelViewerElement | null) => {
-    const previous = viewerRef.current;
-    if (previous && previous !== node) {
-      turnRef.current?.cancel();
-      turnRef.current = null;
-      stopViewer(previous);
-    }
-    viewerRef.current = node;
-  }, []);
-
-  function restoreIdle(viewer: ModelViewerElement) {
-    viewer.minCameraOrbit = IDLE_ORBIT_MIN;
-    viewer.maxCameraOrbit = IDLE_ORBIT_MAX;
-    viewer.cameraControls = true;
-    viewer.interactionPrompt = "auto";
-    viewer.autoRotate = spinRef.current;
-  }
+  selectedRef.current = selected;
 
   function turnToHit(hit: ZoneHit) {
-    const viewer = viewerRef.current;
-    const frame = scaledFrameRef.current ?? bodyFrameRef.current;
-    if (!viewer || !modelLoaded) {
+    const canvas = canvasRef.current;
+    const frame = bodyFrameRef.current;
+    if (!canvas || !frame || !modelLoaded) {
       return;
     }
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     turnRef.current?.cancel();
-    freezeViewer(viewer);
-    turnRef.current = turnCamera(viewer, hitCameraPose(hit, frame), {
+    const pose = hitCameraPose(hit, frame);
+    console.log("Cage look", hit.zone, pose.theta, pose.phi, pose.radius);
+    turnRef.current = turnCamera(canvas, pose, {
       durationMs: reduced ? 0 : TURN_MS,
-      lock: false,
-      onIdle: () => {
-        viewer.minCameraOrbit = TRAVEL_ORBIT_MIN;
-        viewer.maxCameraOrbit = TRAVEL_ORBIT_MAX;
-        viewer.cameraControls = true;
-        viewer.interactionPrompt = "auto";
-        viewer.autoRotate = false;
-      },
     });
   }
 
@@ -369,148 +216,53 @@ export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) 
     console.log("Cage zone", hit.zone);
   }
 
+  function handleLoaded(frame: BodyFrame) {
+    bodyFrameRef.current = frame;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const zone = selectedRef.current;
+      const pose = zone
+        ? hitCameraPose(defaultHitForZone(zone), frame)
+        : homePose(frame);
+      canvas.applyPose(pose);
+      canvas.lockVertical(pose);
+    }
+    setModelLoaded(true);
+    console.log("EventCage loaded", src);
+  }
+
   useLayoutEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer || !modelLoaded) {
-      return;
-    }
-    if (skipTurnRef.current) {
-      skipTurnRef.current = false;
-      return;
-    }
-    if (!selected) {
+    if (!modelLoaded || !selected) {
       return;
     }
     turnToHit(defaultHitForZone(selected));
-  }, [selected, modelLoaded]);
+  }, [selected, modelLoaded, lookNonce]);
 
   useEffect(() => {
-    function swallowLeftover3D(event: PromiseRejectionEvent) {
-      const message = String((event.reason as Error)?.message ?? "");
-      if (message.includes("reading 'add'")) {
-        event.preventDefault();
-      }
+    if (!modelLoaded) {
+      return;
     }
-    window.addEventListener("unhandledrejection", swallowLeftover3D);
-    return () => {
-      window.setTimeout(() => {
-        window.removeEventListener("unhandledrejection", swallowLeftover3D);
-      }, 2500);
-    };
-  }, []);
-
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    function syncSpin() {
-      setSpin(!media.matches);
+    const canvas = canvasRef.current;
+    const root = canvas?.getRoot();
+    const frame = bodyFrameRef.current;
+    if (!root || !frame) {
+      return;
     }
-    syncSpin();
-    media.addEventListener("change", syncSpin);
-    return () => media.removeEventListener("change", syncSpin);
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
-    let viewer: ModelViewerElement | null = null;
-    let loadCount = 0;
-    skipTurnRef.current = true;
-    setModelLoaded(false);
-    setScaledFrame(null);
-
-    const handleLoad = async () => {
-      const current = viewerRef.current;
-      if (cancelled || !current || !current.isConnected) {
-        return;
-      }
-      const thisLoad = ++loadCount;
-      try {
-        await frameLoadedBody(current);
-      } catch (error) {
-        console.log("Could not frame cage body", error);
-        return;
-      }
-      if (cancelled || thisLoad !== loadCount || !current.isConnected) {
-        return;
-      }
-      setModelLoaded(true);
-    };
-
-    function handleError() {
-      console.log("Cage body failed to load");
-    }
-
-    async function frameLoadedBody(loadedViewer: ModelViewerElement) {
-      const dimsNow = loadedViewer.getDimensions();
-      const scaleNow = parseFloat((loadedViewer.scale || "1 1 1").split(" ")[0]) || 1;
-      const factor = dimsNow.y > 0 ? TARGET_HEIGHT_M / dimsNow.y : 1;
-      const nextScale = scaleNow * factor;
-      if (!loadedViewer.isConnected) {
-        return;
-      }
-      loadedViewer.scale = `${nextScale} ${nextScale} ${nextScale}`;
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-      if (cancelled || !loadedViewer.isConnected) {
-        return;
-      }
-
-      const size = loadedViewer.getDimensions();
-      const center = loadedViewer.getBoundingBoxCenter();
-      const nextScaled: BodyFrame = {
-        size: { x: size.x, y: size.y, z: size.z },
-        center: { x: center.x, y: center.y, z: center.z },
-      };
-      const frame: BodyFrame = {
-        size: {
-          x: size.x / nextScale,
-          y: size.y / nextScale,
-          z: size.z / nextScale,
-        },
-        center: {
-          x: center.x / nextScale,
-          y: center.y / nextScale,
-          z: center.z / nextScale,
-        },
-      };
-
-      // Same studio light as the landing body: neutral IBL, 1.15 exposure, soft shadow.
-      loadedViewer.shadowIntensity = 0.85;
-      loadedViewer.shadowSoftness = 1;
-      loadedViewer.interpolationDecay = 1;
-      const pose = homePose(nextScaled);
-      loadedViewer.minCameraOrbit = IDLE_ORBIT_MIN;
-      loadedViewer.maxCameraOrbit = IDLE_ORBIT_MAX;
-      applyPose(loadedViewer, pose);
-      restoreIdle(loadedViewer);
-      bodyFrameRef.current = frame;
-      scaledFrameRef.current = nextScaled;
-      setScaledFrame(nextScaled);
-      console.log("EventCage loaded", src);
-    }
-
-    void ensureModelViewer().then(() => {
-      if (cancelled) {
-        return;
-      }
-      viewer = viewerRef.current;
-      if (!viewer) {
-        return;
-      }
-      viewer.addEventListener("load", handleLoad);
-      viewer.addEventListener("error", handleError);
-      if (viewer.loaded) {
-        void handleLoad();
-      }
-    });
+    void syncCageStickers(root, zones, frame);
     return () => {
       cancelled = true;
+      void cancelled;
+    };
+  }, [modelLoaded, logoKey]);
+
+  useEffect(() => {
+    return () => {
       turnRef.current?.cancel();
       turnRef.current = null;
-      viewer?.removeEventListener("load", handleLoad);
-      viewer?.removeEventListener("error", handleError);
+      disposeCageStickers(canvasRef.current?.getRoot() ?? null);
     };
-  }, [src]);
+  }, []);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -530,20 +282,16 @@ export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) 
   }, []);
 
   function hitAtPoint(clientX: number, clientY: number) {
-    const viewer = viewerRef.current;
-    if (!viewer || !canPick) {
+    const canvas = canvasRef.current;
+    const frame = bodyFrameRef.current;
+    if (!canvas || !frame || !canPick) {
       return undefined;
     }
-    const hit = viewer.positionAndNormalFromPoint(clientX, clientY);
-    if (hit == null) {
+    const point = canvas.raycast(clientX, clientY);
+    if (!point) {
       return undefined;
     }
-    const frame = scaledFrameRef.current ?? bodyFrameRef.current;
-    return nearestHit(frame, {
-      x: hit.position.x,
-      y: hit.position.y,
-      z: hit.position.z,
-    });
+    return nearestHit(frame, { x: point.x, y: point.y, z: point.z });
   }
 
   function onBodyPointerDown(event: ReactPointerEvent) {
@@ -585,10 +333,6 @@ export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) 
     setOverSlot(false);
   }
 
-  const marks = scaledFrame
-    ? zones.filter((zone) => zone.occupied)
-    : [];
-
   if (!src) {
     return <div className="event-cage" />;
   }
@@ -597,6 +341,7 @@ export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) 
     <div ref={frameRef} className="event-cage">
       {!modelLoaded && poster ? (
         <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={poster}
             alt=""
@@ -612,66 +357,28 @@ export default function EventCage({ glbUrl, zones, selected, onSelect }: Props) 
         <p className="event-cage-wait">Loading 3D…</p>
       ) : null}
 
-      <model-viewer
-        ref={bindViewer}
+      <BodyCanvas
+        ref={canvasRef}
         src={src}
-        poster={poster}
-        alt=""
-        loading="eager"
-        reveal="auto"
-        camera-controls
-        disable-zoom
-        field-of-view="34deg"
-        min-field-of-view="30deg"
-        max-field-of-view="40deg"
-        touch-action="none"
-        shadow-intensity="0.85"
-        shadow-softness="1"
-        exposure="1.15"
-        environment-image="neutral"
-        disable-pan
-        interpolation-decay="1"
-        interaction-prompt="auto"
-        auto-rotate={spin && !selected}
-        auto-rotate-delay="0"
-        rotation-per-second="22deg"
+        targetHeight={TARGET_HEIGHT_M}
+        fovDeg={FOV_DEG}
+        background={STUDIO}
+        exposure={EXPOSURE}
+        className={overSlot ? "is-over-slot" : undefined}
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundColor: STUDIO,
+          cursor: overSlot ? "pointer" : "grab",
+        }}
+        onLoaded={handleLoaded}
         onPointerDown={onBodyPointerDown}
         onPointerMove={onBodyPointerMove}
         onPointerUp={onBodyPointerUp}
         onPointerLeave={onBodyPointerLeave}
-        className={overSlot ? "is-over-slot" : undefined}
-        style={{
-          backgroundColor: STUDIO,
-          cursor: overSlot ? "pointer" : "grab",
-        }}
-      >
-        {marks.map((zone) => {
-          const pos = slotWorld(defaultHitForZone(zone.name), scaledFrame!);
-          return (
-            <button
-              key={zone.name}
-              type="button"
-              slot={`hotspot-${zone.name}`}
-              data-position={`${pos.x}m ${pos.y}m ${pos.z}m`}
-              className={
-                zone.name === selected
-                  ? "event-cage-mark is-on"
-                  : "event-cage-mark"
-              }
-              onClick={(event) => {
-                event.stopPropagation();
-                pickHit(defaultHitForZone(zone.name));
-              }}
-            >
-              {zone.logoUrl ? (
-                <img src={zone.logoUrl} alt="" />
-              ) : (
-                (zone.brandLabel ?? "Held").slice(0, 12)
-              )}
-            </button>
-          );
-        })}
-      </model-viewer>
+      />
     </div>
   );
 }
+
+export default memo(EventCage);

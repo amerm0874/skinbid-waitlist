@@ -1,11 +1,13 @@
-import { redirect } from "next/navigation";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
-import { NO_OG_METADATA } from "@/lib/seo";
 import { destinationAfterAuth, parseRole } from "@/lib/config";
-import { googleAuthEnabled } from "@/lib/supabase/env";
+import { isLogoDeskNext, resolveLogoAuthNext } from "@/lib/logo";
+import { NO_OG_METADATA } from "@/lib/seo";
 import { ProductShell } from "@/components/product/ProductShell";
 import LoginForm from "./LoginForm";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Log in",
@@ -24,36 +26,46 @@ export default async function LoginPage({
   searchParams: Promise<{
     role?: string | string[];
     next?: string | string[];
+    bid_id?: string | string[];
     error?: string | string[];
+    signedout?: string | string[];
   }>;
 }) {
   const params = await searchParams;
   const role = parseRole(params.role);
-  const next = firstQuery(params.next) ?? null;
+  const next =
+    resolveLogoAuthNext(firstQuery(params.next), firstQuery(params.bid_id)) ||
+    null;
   const error = firstQuery(params.error);
+  const signedOut = firstQuery(params.signedout) === "1";
   const { user, profile } = await getSessionUser();
 
-  if (user) {
+  if (user && !signedOut) {
+    if (next && isLogoDeskNext(next)) {
+      redirect(next);
+    }
     redirect(destinationAfterAuth(profile, role, next));
   }
 
   return (
-    <ProductShell>
-      <div className="page-stack">
+    <ProductShell signedOut={signedOut}>
+      <div className="page-stack auth-stack">
         <div>
           <h1 className="display page-title">Log in</h1>
           <p className="page-lead">
-            Email and password.
-            {role
-              ? ` After that we open ${role} onboarding.`
-              : " After that you pick athlete or brand."}
+            {role === "brand" && isLogoDeskNext(next)
+              ? "Log in to upload your logo."
+              : role === "athlete"
+                ? "List a race."
+                : role === "brand"
+                  ? "Advertise your brand."
+                  : "List a race, or advertise your brand."}
           </p>
         </div>
         <LoginForm
           role={role}
           next={next}
           errorNotice={error === "signin" ? "Sign in again." : undefined}
-          showGoogle={googleAuthEnabled()}
         />
       </div>
     </ProductShell>

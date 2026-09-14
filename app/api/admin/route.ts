@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, isAdminEmail } from "@/lib/auth";
-import { notifyProofReviewed } from "@/lib/email";
+import { notifyProofReviewed, notifyRefundDone } from "@/lib/email";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 
 type Body = {
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
   const { data: event } = await admin
     .from("events")
-    .select("athlete_id, name")
+    .select("athlete_id, name, slug")
     .eq("id", proof.event_id)
     .maybeSingle();
 
@@ -56,7 +56,9 @@ export async function POST(request: Request) {
       await notifyProofReviewed({
         proofId: proof.id,
         athleteId: event.athlete_id,
+        eventId: proof.event_id,
         eventName: event.name,
+        eventSlug: event.slug,
         approved: true,
       });
     }
@@ -66,9 +68,22 @@ export async function POST(request: Request) {
 
   const { data: zones } = await admin
     .from("zones")
-    .select("id")
+    .select("id, name")
     .eq("event_id", proof.event_id);
   const zoneIds = (zones ?? []).map((row) => row.id);
+  const zoneName = new Map((zones ?? []).map((row) => [row.id, row.name]));
+  const { data: refundBids } = zoneIds.length
+    ? await admin
+        .from("bids")
+        .select("id, brand_id, amount_cents, zone_id")
+        .in("zone_id", zoneIds)
+        .in("status", ["held", "won"])
+    : { data: [] as Array<{
+        id: string;
+        brand_id: string;
+        amount_cents: number;
+        zone_id: string;
+      }> };
   if (zoneIds.length > 0) {
     const { error: bidError } = await admin
       .from("bids")
@@ -93,9 +108,22 @@ export async function POST(request: Request) {
     await notifyProofReviewed({
       proofId: proof.id,
       athleteId: event.athlete_id,
+      eventId: proof.event_id,
       eventName: event.name,
+      eventSlug: event.slug,
       approved: false,
     });
+    if (event.slug) {
+      for (const bid of refundBids ?? []) {
+        await notifyRefundDone({
+          bidId: bid.id,
+          brandId: bid.brand_id,
+          zoneName: zoneName.get(bid.zone_id) ?? "zone",
+          amountCents: bid.amount_cents,
+          eventSlug: event.slug,
+        });
+      }
+    }
   }
   console.log("Proof rejected, bids marked refunded. No payout call.");
   return NextResponse.json({ ok: true });

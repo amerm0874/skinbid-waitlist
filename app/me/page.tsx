@@ -9,6 +9,7 @@ import {
 } from "@/lib/athlete-status";
 import { closeEventAuction } from "@/lib/close-auctions";
 import { sessionGateRedirect } from "@/lib/config";
+import { logoDeskPath } from "@/lib/logo";
 import { demoteLiveWithoutReadyGlb } from "@/lib/event-create";
 import { loadLiveSlotCards, type LiveSlotCard as LiveSlotCardRow } from "@/lib/live-listings";
 import { centsToUsd } from "@/lib/money";
@@ -385,7 +386,14 @@ export default async function MePage() {
           photoUrl={profile.photo_url ?? null}
         />
       ) : (
-        <BrandMe bids={brandBids} live={liveCards} races={suggestedRaces} />
+        <BrandMe
+          bids={brandBids}
+          live={liveCards}
+          races={suggestedRaces}
+          userId={user.id}
+          name={profile.name ?? ""}
+          logoUrl={profile.logo_url ?? null}
+        />
       )}
     </ProductShell>
   );
@@ -417,7 +425,7 @@ function AthleteMe({
         {events.length > 0 && canList ? (
           <Link href="/new" className="cta-press page-head-btn">
             <span className="cta-press-plate" aria-hidden="true" />
-            <span className="cta-press-face">Participate</span>
+            <span className="cta-press-face">List a race</span>
           </Link>
         ) : null}
       </div>
@@ -431,7 +439,7 @@ function AthleteMe({
           <p className="text-[14px] text-muted">No race yet.</p>
           <Link href="/new" className="cta-press">
             <span className="cta-press-plate" aria-hidden="true" />
-            <span className="cta-press-face">Participate</span>
+            <span className="cta-press-face">List a race</span>
           </Link>
           {races.length > 0 ? (
             <SuggestedRaces races={races} />
@@ -499,14 +507,28 @@ function BrandMe({
   bids,
   live,
   races,
+  userId,
+  name,
+  logoUrl,
 }: {
   bids: BrandBid[];
   live: LiveSlotCardRow[];
   races: OfficialEvent[];
+  userId: string;
+  name: string;
+  logoUrl: string | null;
 }) {
   return (
     <div className="page-stack">
-      <h1 className="slot-board-kicker">Your bids</h1>
+      <div className="me-identity">
+        <AvatarUpload
+          userId={userId}
+          name={name}
+          initialUrl={logoUrl}
+          kind="logo"
+        />
+        <h1 className="slot-board-kicker">Your bids</h1>
+      </div>
 
       {bids.length === 0 ? (
         <>
@@ -548,7 +570,14 @@ function BrandMe({
             return (
               <li key={bid.id}>
                 {bid.eventSlug ? (
-                  <Link href={`/e/${bid.eventSlug}`} className="slot-ticket">
+                  <Link
+                    href={
+                      bid.status === "won" || bid.status === "held"
+                        ? logoDeskPath(bid.eventSlug)
+                        : `/e/${bid.eventSlug}`
+                    }
+                    className="slot-ticket"
+                  >
                     {body}
                   </Link>
                 ) : (

@@ -1,6 +1,7 @@
 import { eventDateWindowError, eventSlugError, normalizeEventSlug } from "@/lib/auction";
 import { parseAthleteSport } from "@/lib/config";
 import { isCountry } from "@/lib/countries";
+import { parseMarkOffer } from "@/lib/logo";
 import { ZONE_NAMES, isZoneName } from "@/lib/zones";
 import type { createServerSupabase } from "@/lib/supabase/server";
 
@@ -14,6 +15,8 @@ export type EventCreateBody = {
   slug?: string;
   likeness_opt_in?: boolean;
   appearance_price_cents?: number | null;
+  offer_tattoo?: boolean;
+  offer_sticker?: boolean;
   zones?: Record<string, "open" | "closed">;
 };
 
@@ -140,6 +143,14 @@ export function parseEventCreateBody(
     return { ok: false as const, error: "Leave at least one zone open." };
   }
 
+  const offer = parseMarkOffer({
+    offer_tattoo: body.offer_tattoo,
+    offer_sticker: body.offer_sticker,
+  });
+  if (body.offer_tattoo === false && body.offer_sticker === false) {
+    return { ok: false as const, error: "Offer a tattoo, a sticker, or both." };
+  }
+
   return {
     ok: true as const,
     name,
@@ -151,6 +162,8 @@ export function parseEventCreateBody(
     slug,
     likeness_opt_in: Boolean(body.likeness_opt_in),
     appearance_price_cents: body.appearance_price_cents ?? null,
+    offer_tattoo: offer.tattoo,
+    offer_sticker: offer.sticker,
     zones: body.zones,
   };
 }
@@ -167,6 +180,24 @@ export function zoneRows(
         ? "closed"
         : ("open" as const),
   }));
+}
+
+// Backfill new named rows (abs) on existing events. Missing names stay open.
+export async function ensureEventZoneRows(db: Db, eventId: string) {
+  const { data } = await db.from("zones").select("name").eq("event_id", eventId);
+  const have = new Set((data ?? []).map((row) => row.name));
+  const missing = ZONE_NAMES.filter((name) => !have.has(name)).map((name) => ({
+    event_id: eventId,
+    name,
+    status: "open" as const,
+  }));
+  if (!missing.length) {
+    return;
+  }
+  const { error } = await db.from("zones").insert(missing);
+  if (error) {
+    console.log("ensureEventZoneRows", eventId, error.message);
+  }
 }
 
 export function insertErrorMessage(error: { code?: string; message?: string }) {

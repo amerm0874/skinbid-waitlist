@@ -4,7 +4,7 @@ import { SITE } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Email SkinBid about the waitlist, a race, or a brand.",
+  description: "Email SkinBid about a race or a brand.",
 };
 
 export default function ContactPage() {

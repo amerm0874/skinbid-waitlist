@@ -1,40 +1,82 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { getSessionUser } from "@/lib/auth";
+import { AUTH_NEXT_COOKIE } from "@/lib/auth-return";
 import { NO_OG_METADATA } from "@/lib/seo";
 import {
-  homeForCompleteProfile,
-  loginPath,
+  destinationAfterAuth,
   parseRole,
   pathAfterProfile,
   sessionGateRedirect,
 } from "@/lib/config";
+import { safeReturnPath } from "@/lib/launch";
 import { ProductShell } from "@/components/product/ProductShell";
+import OnboardingAuth from "./OnboardingAuth";
 import OnboardingForm from "./OnboardingForm";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Onboarding",
   ...NO_OG_METADATA,
 };
 
+function firstQuery(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function decodeCookieValue(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ role?: string | string[] }>;
+  searchParams: Promise<{
+    role?: string | string[];
+    next?: string | string[];
+  }>;
 }) {
-  const intendedRole = parseRole((await searchParams).role);
+  const params = await searchParams;
+  const intendedRole = parseRole(params.role);
+  const cookieStore = await cookies();
+  const returnTo =
+    safeReturnPath(firstQuery(params.next) ?? null) ||
+    safeReturnPath(decodeCookieValue(cookieStore.get(AUTH_NEXT_COOKIE)?.value)) ||
+    null;
   const { user, profile } = await getSessionUser();
   const gate = sessionGateRedirect(user, profile, "/onboarding", intendedRole);
   if (gate) {
     redirect(gate);
   }
+
   if (!user) {
-    redirect(loginPath(intendedRole, "/onboarding"));
+    return (
+      <ProductShell>
+        <div className="page-stack auth-stack">
+          <div>
+            <h1 className="display page-title">Set your role</h1>
+            <p className="page-lead">
+              Athlete lists one race. Brand browses races. You cannot switch
+              later.
+            </p>
+          </div>
+          <OnboardingAuth role={intendedRole} next={returnTo} />
+        </div>
+      </ProductShell>
+    );
   }
 
-  const next = pathAfterProfile(profile);
-  if (next !== "/onboarding") {
-    redirect(homeForCompleteProfile(profile));
+  if (pathAfterProfile(profile) !== "/onboarding") {
+    redirect(destinationAfterAuth(profile, intendedRole, returnTo));
   }
 
   const brandFirstRun = profile?.role === "brand";
@@ -49,7 +91,7 @@ export default async function OnboardingPage({
           <p className="page-lead">
             {brandFirstRun
               ? "Brand name, website, and one category. Logo is optional. You pay SkinBid later."
-              : "Athlete lists one event. Brand browses live events. You cannot switch later."}
+              : "Athlete lists one race. Brand browses races. You cannot switch later."}
           </p>
         </div>
         <OnboardingForm
@@ -57,6 +99,7 @@ export default async function OnboardingPage({
           email={user.email ?? ""}
           profile={profile}
           intendedRole={intendedRole}
+          next={returnTo}
         />
       </div>
     </ProductShell>

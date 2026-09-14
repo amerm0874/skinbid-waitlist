@@ -55,11 +55,58 @@ export function slugFromName(name: string | null | undefined) {
   return slug || null;
 }
 
-export function publicAthleteHandle(profile: {
+function handleFromSocials(socials: unknown) {
+  if (!Array.isArray(socials)) {
+    return null;
+  }
+  for (const row of socials) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const handle = normalizeHandle(
+      String((row as { handle?: unknown }).handle ?? ""),
+    );
+    if (handle) {
+      return handle;
+    }
+  }
+  return null;
+}
+
+export function athleteHandleCandidates(profile: {
   social?: string | null;
+  socials?: unknown;
   name?: string | null;
 }) {
-  return handleFromSocial(profile.social) || slugFromName(profile.name);
+  const handles = [
+    handleFromSocial(profile.social),
+    handleFromSocials(profile.socials),
+    slugFromName(profile.name),
+  ].filter((value): value is string => Boolean(value));
+  return [...new Set(handles)];
+}
+
+export function publicAthleteHandle(profile: {
+  social?: string | null;
+  socials?: unknown;
+  name?: string | null;
+}) {
+  return athleteHandleCandidates(profile)[0] ?? null;
+}
+
+export function athleteMatchesHandle(
+  profile: {
+    social?: string | null;
+    socials?: unknown;
+    name?: string | null;
+  },
+  handle: string,
+) {
+  return athleteHandleCandidates(profile).includes(handle);
+}
+
+export function athleteProfilePath(handle: string | null | undefined) {
+  return handle ? `/a/${handle}` : null;
 }
 
 export function socialLink(social: string | null | undefined) {

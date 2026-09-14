@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,10 +8,12 @@ import {
   CAPTURE_TITLE,
   CAPTURE_VIDEO_ACCEPT,
   captureFilesError,
-  nameClipFileError,
+  profileClipFileError,
   orbitFileError,
+  PAY_MODEL_LABEL,
   uploadCapture,
 } from "@/lib/capture";
+import { captureEvent } from "@/lib/analytics";
 import { onboardingPath, parseAthleteSport } from "@/lib/config";
 import { isCountry } from "@/lib/countries";
 import {
@@ -32,6 +34,7 @@ import {
 } from "@/lib/official-events";
 import { ZONE_NAMES, type ZoneName } from "@/lib/zones";
 import CountrySelect from "@/components/product/CountrySelect";
+import { CapturePlaceholder } from "@/components/product/CapturePlaceholder";
 import ZoneBodyPicker from "@/components/product/ZoneBodyPicker";
 
 const initialZones = Object.fromEntries(
@@ -44,6 +47,7 @@ export default function NewEventForm({
   userId,
   avatarReady,
   scanUploaded,
+  modelPaid,
   existing,
   profileCountry,
   profileCity,
@@ -55,6 +59,7 @@ export default function NewEventForm({
   userId: string;
   avatarReady: boolean;
   scanUploaded: boolean;
+  modelPaid: boolean;
   existing: ListedEvent | null;
   profileCountry?: string | null;
   profileCity?: string | null;
@@ -65,7 +70,13 @@ export default function NewEventForm({
 }) {
   const [savedDraft, setSavedDraft] = useState<ListedEvent | null>(null);
   const [justUploadedScan, setJustUploadedScan] = useState(false);
+  const [paid, setPaid] = useState(modelPaid);
+  const markPaid = useCallback(() => setPaid(true), []);
   const draft = existing?.status === "draft" ? existing : savedDraft;
+
+  useEffect(() => {
+    setPaid(modelPaid);
+  }, [modelPaid]);
 
   if (existing?.status === "live") {
     return <LiveNotice event={existing} />;
@@ -76,6 +87,8 @@ export default function NewEventForm({
         userId={userId}
         avatarReady={avatarReady}
         scanUploaded={scanUploaded || justUploadedScan}
+        modelPaid={paid}
+        onModelPaid={markPaid}
         event={draft}
       />
     );
@@ -84,6 +97,8 @@ export default function NewEventForm({
     <CreateEventForm
       userId={userId}
       avatarReady={avatarReady}
+      modelPaid={paid}
+      onModelPaid={markPaid}
       profileCountry={profileCountry}
       profileCity={profileCity}
       profileSport={profileSport}
@@ -121,11 +136,15 @@ function DraftPublishForm({
   userId,
   avatarReady,
   scanUploaded,
+  modelPaid,
+  onModelPaid,
   event,
 }: {
   userId: string;
   avatarReady: boolean;
   scanUploaded: boolean;
+  modelPaid: boolean;
+  onModelPaid: () => void;
   event: ListedEvent;
 }) {
   const router = useRouter();
@@ -136,9 +155,12 @@ function DraftPublishForm({
   const [scanSaved, setScanSaved] = useState(scanUploaded);
   const canPublish = avatarReady || Boolean(glbFile);
   const canUploadScan =
-    capture.orbitFiles.length > 0 && Boolean(capture.nameClip);
+    modelPaid && capture.orbitFiles.length > 0 && Boolean(capture.nameClip);
 
   async function saveCaptureIfNeeded() {
+    if (!modelPaid) {
+      return false;
+    }
     const reason = await captureFilesError(capture.orbitFiles, capture.nameClip);
     if (reason) {
       throw new Error(reason);
@@ -147,6 +169,8 @@ function DraftPublishForm({
       return false;
     }
     await uploadCapture(userId, capture.orbitFiles, capture.nameClip);
+    captureEvent("orbit_clip_uploaded");
+    captureEvent("profile_clip_uploaded");
     setScanSaved(true);
     capture.clear();
     return true;
@@ -158,7 +182,7 @@ function DraftPublishForm({
     try {
       const saved = await saveCaptureIfNeeded();
       if (!saved) {
-        setErrorMessage("Add the orbit and the 10s name clip.");
+        setErrorMessage("Add the orbit clip and the profile clip.");
       }
     } catch (error) {
       console.log("Capture upload failed", error);
@@ -199,12 +223,11 @@ function DraftPublishForm({
   return (
     <div className="form-shell max-w-lg">
       <p className="font-mono text-[11px] tracking-[0.14em] text-accent">
-        Scan required
+        Scan your body
       </p>
       <h2 className="mt-2 text-[22px] font-semibold">{event.name}</h2>
       <p className="mt-2 text-[14px] text-muted">
-        No .glb yet, so this stays draft. It is not listed on /events or /e/
-        {event.slug}.
+        No 3D body yet, so this listing is not public.
       </p>
       <p className="mt-3 font-mono text-[12px] text-muted">
         {event.city ?? "-"} · {event.sport ?? "-"} · {formatEventDate(event.date)}
@@ -213,19 +236,21 @@ function DraftPublishForm({
       <CaptureFields
         key={capture.resetKey}
         scanUploaded={scanSaved}
+        modelPaid={modelPaid}
+        onModelPaid={onModelPaid}
         orbitError={capture.orbitError}
         nameClipError={capture.nameClipError}
         onOrbitChange={capture.setOrbitFiles}
         onNameClipChange={capture.setNameClip}
       />
       <GlbFileField
-        label="Body file (.glb), optional"
+        label="3D body file, optional"
         onChange={setGlbFile}
       />
       <p className="mt-2 text-[13px] text-muted">
         {avatarReady
           ? "A body file is already marked ready. Publish to open the event page."
-          : "Videos do not mark the body ready. Only a .glb does."}
+          : "Videos do not publish the listing. We need the finished 3D body."}
       </p>
 
       {errorMessage ? <p className="mt-4 text-[13px] text-danger">{errorMessage}</p> : null}
@@ -269,6 +294,8 @@ function sportFromProfile(
 function CreateEventForm({
   userId,
   avatarReady,
+  modelPaid,
+  onModelPaid,
   profileCountry,
   profileCity,
   profileSport,
@@ -280,6 +307,8 @@ function CreateEventForm({
 }: {
   userId: string;
   avatarReady: boolean;
+  modelPaid: boolean;
+  onModelPaid: () => void;
   profileCountry?: string | null;
   profileCity?: string | null;
   profileSport?: string | null;
@@ -318,6 +347,8 @@ function CreateEventForm({
     () => prefillRace?.city?.trim() || profileCity?.trim() || "",
   );
   const [likeness, setLikeness] = useState(false);
+  const [offerTattoo, setOfferTattoo] = useState(true);
+  const [offerSticker, setOfferSticker] = useState(true);
   const [zones, setZones] = useState(initialZones);
   const [glbFile, setGlbFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -444,6 +475,10 @@ function CreateEventForm({
       setErrorMessage(capture.nameClipError);
       return;
     }
+    if ((capture.orbitFiles.length > 0 || capture.nameClip) && !modelPaid) {
+      setErrorMessage("Pay $50 for the 3D model first.");
+      return;
+    }
     const captureReason = await captureFilesError(
       capture.orbitFiles,
       capture.nameClip,
@@ -457,6 +492,8 @@ function CreateEventForm({
     try {
       if (capture.orbitFiles.length > 0 && capture.nameClip) {
         await uploadCapture(userId, capture.orbitFiles, capture.nameClip);
+        captureEvent("orbit_clip_uploaded");
+        captureEvent("profile_clip_uploaded");
         onScanUploaded();
       }
       if (glbFile) {
@@ -472,6 +509,8 @@ function CreateEventForm({
           city,
           slug: nextSlug,
           likeness_opt_in: likeness,
+          offer_tattoo: offerTattoo,
+          offer_sticker: offerSticker,
           zones,
         }),
       });
@@ -486,6 +525,10 @@ function CreateEventForm({
         return;
       }
       console.log("Event created", payload.slug, payload.status);
+      captureEvent("race_created", {
+        slug: payload.slug,
+        status: payload.status ?? "",
+      });
       if (payload.status === "live") {
         router.push(`/e/${payload.slug}`);
         return;
@@ -670,6 +713,45 @@ function CreateEventForm({
 
       <div className="form-shell">
         <fieldset className="mt-6">
+          <legend className="field-label">Marks you will wear</legend>
+          <div className="seg w-full">
+            <button
+              type="button"
+              className={`flex-1 ${offerTattoo && !offerSticker ? "is-on" : ""}`}
+              onClick={() => {
+                setOfferTattoo(true);
+                setOfferSticker(false);
+              }}
+            >
+              Tattoo
+            </button>
+            <button
+              type="button"
+              className={`flex-1 ${!offerTattoo && offerSticker ? "is-on" : ""}`}
+              onClick={() => {
+                setOfferTattoo(false);
+                setOfferSticker(true);
+              }}
+            >
+              Sticker
+            </button>
+            <button
+              type="button"
+              className={`flex-1 ${offerTattoo && offerSticker ? "is-on" : ""}`}
+              onClick={() => {
+                setOfferTattoo(true);
+                setOfferSticker(true);
+              }}
+            >
+              Both
+            </button>
+          </div>
+          <p className="mt-2 text-[13px] text-muted">
+            Winner picks tattoo vs sticker only if you offer both.
+          </p>
+        </fieldset>
+
+        <fieldset className="mt-6">
           <legend className="field-label">Likeness reuse in other ads</legend>
           <div className="seg w-full">
             <button
@@ -694,24 +776,27 @@ function CreateEventForm({
         </fieldset>
 
         <CaptureFields
+          scanUploaded={false}
+          modelPaid={modelPaid}
+          onModelPaid={onModelPaid}
           orbitError={capture.orbitError}
           nameClipError={capture.nameClipError}
           onOrbitChange={capture.setOrbitFiles}
           onNameClipChange={capture.setNameClip}
         />
         <GlbFileField
-          label="Body file (.glb), optional"
+          label="3D body file, optional"
           onChange={setGlbFile}
         />
         <p className="mt-2 text-[13px] text-muted">
           {avatarReady
-            ? `A body file is already marked ready. Saving will publish /e/${slugPreview}.`
-            : "Videos do not mark the body ready. Only a .glb does. No .glb → the event stays draft and is not listed."}
+            ? `A body file is already marked ready. Saving will publish the event page.`
+            : "Videos do not publish the listing. We need the finished 3D body. Until then this is not public."}
         </p>
 
         {errorMessage ? <p className="mt-4 text-[13px] text-danger">{errorMessage}</p> : null}
         <button type="submit" disabled={busy} className="btn btn-solid mt-6">
-          {busy ? "Saving…" : willPublish ? "Publish event" : "Save draft"}
+          {busy ? "Saving…" : willPublish ? "Publish event" : "Save — not public yet"}
         </button>
         <Link href="/me" className="btn btn-ghost mt-3">
           Skip
@@ -743,9 +828,13 @@ function useCaptureFiles() {
     setOrbitError(reason);
   }
 
-  function setNameClip(file: File | null) {
+  async function setNameClip(file: File | null) {
     setNameClipState(file);
-    setNameClipError(nameClipFileError(file));
+    if (!file) {
+      setNameClipError("");
+      return;
+    }
+    setNameClipError(await profileClipFileError(file));
   }
 
   function clear() {
@@ -771,17 +860,130 @@ function useCaptureFiles() {
 
 function CaptureFields({
   scanUploaded,
+  modelPaid,
+  onModelPaid,
   orbitError,
   nameClipError,
   onOrbitChange,
   onNameClipChange,
 }: {
   scanUploaded?: boolean;
+  modelPaid: boolean;
+  onModelPaid: () => void;
   orbitError: string;
   nameClipError: string;
   onOrbitChange: (files: File[]) => void;
   onNameClipChange: (file: File | null) => void;
 }) {
+  const [paid, setPaid] = useState(modelPaid);
+  const [payBusy, setPayBusy] = useState(false);
+  const [payMessage, setPayMessage] = useState("");
+  const [payFailed, setPayFailed] = useState(false);
+  const paidTracked = useRef(modelPaid);
+
+  useEffect(() => {
+    setPaid(modelPaid);
+    if (modelPaid) {
+      paidTracked.current = true;
+    }
+  }, [modelPaid]);
+
+  function markPaid() {
+    setPaid(true);
+    onModelPaid();
+    if (!paidTracked.current) {
+      paidTracked.current = true;
+      captureEvent("model_paid");
+    }
+  }
+
+  useEffect(() => {
+    if (paid) {
+      return;
+    }
+    const returnedId = new URLSearchParams(window.location.search).get("capture_id");
+    if (!returnedId) {
+      return;
+    }
+    setPayMessage("Payment received. Scan unlocks when Whop confirms.");
+    setPayFailed(false);
+    captureEvent("checkout_returned", {
+      kind: "model",
+      capture_id: returnedId,
+    });
+    let cancelled = false;
+    async function poll() {
+      try {
+        const response = await fetch("/api/captures/checkout");
+        const payload = (await response.json()) as {
+          model_paid?: boolean;
+        };
+        if (cancelled || !response.ok || !payload.model_paid) {
+          return;
+        }
+        markPaid();
+        setPayMessage("Paid. Upload the profile clip and the orbit clip.");
+      } catch (error) {
+        console.log("Model pay poll failed", error);
+      }
+    }
+    void poll();
+    const tick = window.setInterval(() => {
+      void poll();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(tick);
+    };
+  }, [paid, onModelPaid]);
+
+  async function payForModel() {
+    captureEvent("model_pay_clicked");
+    setPayBusy(true);
+    setPayMessage("");
+    setPayFailed(false);
+    try {
+      const response = await fetch("/api/captures/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ return_to: "/new" }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+        model_paid?: boolean;
+        checkout_url?: string;
+      } | null;
+      if (!payload) {
+        setPayFailed(true);
+        setPayMessage(`Checkout failed (${response.status}).`);
+        return;
+      }
+      if (!response.ok) {
+        setPayFailed(true);
+        setPayMessage(payload.error || `Checkout failed (${response.status}).`);
+        return;
+      }
+      if (payload.model_paid) {
+        markPaid();
+        setPayMessage("Paid. Upload the profile clip and the orbit clip.");
+        return;
+      }
+      if (payload.checkout_url) {
+        captureEvent("checkout_opened", { kind: "model" });
+        window.location.href = payload.checkout_url;
+        return;
+      }
+      setPayFailed(true);
+      setPayMessage("Whop returned no checkout URL.");
+    } catch (error) {
+      console.log("Athlete model checkout failed", error);
+      setPayFailed(true);
+      setPayMessage(error instanceof Error ? error.message : "Checkout request failed.");
+    } finally {
+      setPayBusy(false);
+    }
+  }
+
   return (
     <section className="capture-block">
       <h2>{CAPTURE_TITLE}</h2>
@@ -793,43 +995,71 @@ function CaptureFields({
           </li>
         ))}
       </ol>
-      {scanUploaded ? (
-        <p className="mt-3 text-[13px] text-muted">
-          Scan files uploaded. Event stays draft until the GLB is ready.
+      {paid ? (
+        <>
+          {scanUploaded ? (
+            <p className="mt-3 text-[13px] text-muted">
+              Scan files uploaded. Not public yet — we still need the 3D body.
+            </p>
+          ) : (
+            <p className="mt-3 text-[13px] text-muted">
+              Paid. Upload the orbit clip and the 5–10s profile clip.
+            </p>
+          )}
+          <label className="mt-4 block">
+            <FieldHint
+              label="Orbit clip"
+              hint="60–90s slow circle, phone at chest, hair to mid-shin. We build the GLB by hand."
+            />
+            <input
+              className="field pt-2 text-[13px]"
+              type="file"
+              accept={CAPTURE_VIDEO_ACCEPT}
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                onOrbitChange(file ? [file] : []);
+              }}
+            />
+          </label>
+          {orbitError ? (
+            <p className="mt-2 text-[13px] text-danger">{orbitError}</p>
+          ) : null}
+          <label className="mt-4 block">
+            <FieldHint
+              label="Profile clip"
+              hint="5–10s, face + chest. This plays on your athlete page."
+            />
+            <input
+              className="field pt-2 text-[13px]"
+              type="file"
+              accept={CAPTURE_VIDEO_ACCEPT}
+              onChange={(event) => onNameClipChange(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          {nameClipError ? (
+            <p className="mt-2 text-[13px] text-danger">{nameClipError}</p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <p className="mt-3 text-[13px] text-muted">
+            Unpaid body is the placeholder. Pay $50, then upload the two clips.
+          </p>
+          <CapturePlaceholder />
+          <button
+            type="button"
+            className="btn btn-solid mt-4 w-full"
+            disabled={payBusy}
+            onClick={() => void payForModel()}
+          >
+            {payBusy ? "Opening checkout…" : PAY_MODEL_LABEL}
+          </button>
+        </>
+      )}
+      {payMessage ? (
+        <p className={`mt-3 text-[13px] ${payFailed ? "text-danger" : "text-accent"}`}>
+          {payMessage}
         </p>
-      ) : null}
-      <label className="mt-4 block">
-        <FieldHint
-          label="Orbit"
-          hint="60–90s slow circle, phone at chest, hair to mid-shin."
-        />
-        <input
-          className="field pt-2 text-[13px]"
-          type="file"
-          accept={CAPTURE_VIDEO_ACCEPT}
-          onChange={(event) => {
-            const file = event.target.files?.[0] ?? null;
-            onOrbitChange(file ? [file] : []);
-          }}
-        />
-      </label>
-      {orbitError ? (
-        <p className="mt-2 text-[13px] text-danger">{orbitError}</p>
-      ) : null}
-      <label className="mt-4 block">
-        <FieldHint
-          label="Name clip"
-          hint="10s, face + chest, say your display name."
-        />
-        <input
-          className="field pt-2 text-[13px]"
-          type="file"
-          accept={CAPTURE_VIDEO_ACCEPT}
-          onChange={(event) => onNameClipChange(event.target.files?.[0] ?? null)}
-        />
-      </label>
-      {nameClipError ? (
-        <p className="mt-2 text-[13px] text-danger">{nameClipError}</p>
       ) : null}
     </section>
   );
@@ -846,7 +1076,7 @@ function GlbFileField({
     <label className="mt-4 block">
       <FieldHint
         label={label}
-        hint="optional .glb if you already have a model."
+        hint="optional if you already have a model."
       />
       <input
         className="field pt-2 text-[13px]"

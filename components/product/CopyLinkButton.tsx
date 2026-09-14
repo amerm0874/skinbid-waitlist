@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CopyIcon } from "@/components/product/Icons";
 
 type Props = {
   path: string;
@@ -80,12 +81,17 @@ export function CopyLinkButton({ path, title, className }: Props) {
   return (
     <button
       type="button"
-      className={className ?? "btn btn-ghost"}
+      className={`${className ?? "btn btn-ghost"}${copied ? " is-copied" : ""}`}
       onClick={onClick}
       aria-label="Copy link"
       aria-live="polite"
     >
-      {copied ? "Copied" : "Copy link"}
+      {copied ? "Copied" : (
+        <>
+          <CopyIcon size={16} />
+          Copy link
+        </>
+      )}
     </button>
   );
 }

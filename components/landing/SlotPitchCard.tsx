@@ -34,12 +34,12 @@ export default function SlotPitchCard({ label, onClose }: Props) {
       </div>
       <p className="hud-pitch-lead">You can put your brand here.</p>
       <p className="hud-pitch-copy">
-        This is a preview, not a live auction. See a real event page for how
-        bidding actually works.
+        This is a preview. Bidding is not open. Floor $100. Money held until
+        photos.
       </p>
       <Link href="/e/demo" className="press-btn hud-pitch-cta">
         <span className="press-btn-plate" aria-hidden="true" />
-        <span className="press-btn-face">See a live event</span>
+        <span className="press-btn-face">Open the event page</span>
       </Link>
     </div>
   );

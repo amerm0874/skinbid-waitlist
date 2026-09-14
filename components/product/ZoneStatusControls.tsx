@@ -8,6 +8,7 @@ import { centsToUsd } from "@/lib/money";
 import type { ZoneStatus } from "@/lib/types";
 import { isPersistedZoneId } from "@/lib/zone-bids";
 import { ZONE_LABEL, ZONE_NAMES, type ZoneName } from "@/lib/zones";
+import { captureEvent } from "@/lib/analytics";
 import { zoneToggleError } from "@/lib/zone-status";
 import { DownloadLogo } from "@/components/product/DownloadLogo";
 
@@ -101,6 +102,9 @@ export function MeZoneBoard({ eventDate, zones }: BoardProps) {
     setMessage("");
     try {
       const status = await patchZoneStatus(zone.id, next);
+      captureEvent(status === "closed" ? "zone_close" : "zone_open", {
+        zone: zone.name,
+      });
       setPending({ id: zone.id, status });
       console.log("Zone", status, zone.name);
       router.refresh();
@@ -233,6 +237,9 @@ export function EventZoneOwnerAction({
     onMessage("");
     try {
       const status = await patchZoneStatus(zone.id, next);
+      captureEvent(status === "closed" ? "zone_close" : "zone_open", {
+        zone: zone.name,
+      });
       onStatus(status);
       onMessage(status === "closed" ? "Zone closed." : "Zone reopened.");
       console.log("Zone", status, zone.name);

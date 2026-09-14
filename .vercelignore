@@ -1,0 +1,7 @@
+mobile
+.next
+.playwright-mcp
+secret
+*.pem
+.env*
+!.env.example

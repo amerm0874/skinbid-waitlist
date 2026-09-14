@@ -13,8 +13,8 @@ export async function PATCH(request: Request) {
   if (!supabase || !user) {
     return NextResponse.json({ error: "Log in first." }, { status: 401 });
   }
-  if (!profile || profile.role !== "athlete") {
-    return NextResponse.json({ error: "Athletes only." }, { status: 403 });
+  if (profile?.role !== "athlete" && profile?.role !== "brand") {
+    return NextResponse.json({ error: "Profile photo needs a role." }, { status: 403 });
   }
   if (!takeToken(`profile-photo:${user.id}`, 20, 10 * 60 * 1000)) {
     return NextResponse.json(
@@ -23,31 +23,32 @@ export async function PATCH(request: Request) {
     );
   }
 
-  let body: { photo_url?: unknown } = {};
+  let body: { photo_url?: unknown; logo_url?: unknown } = {};
   try {
-    body = (await request.json()) as { photo_url?: unknown };
+    body = (await request.json()) as { photo_url?: unknown; logo_url?: unknown };
   } catch {
     return NextResponse.json({ error: "Bad payload." }, { status: 400 });
   }
 
-  if (!looksLikePhotoUrl(body.photo_url)) {
+  const isBrand = profile.role === "brand";
+  const nextUrl = isBrand ? body.logo_url : body.photo_url;
+  if (!looksLikePhotoUrl(nextUrl)) {
     return NextResponse.json({ error: "Bad photo URL." }, { status: 400 });
   }
 
-  const { error } = await supabase
-    .from("profiles")
-    .update({ photo_url: body.photo_url })
-    .eq("id", user.id);
+  const patch = isBrand ? { logo_url: nextUrl } : { photo_url: nextUrl };
+  const { error } = await supabase.from("profiles").update(patch).eq("id", user.id);
   if (error) {
     console.log("Avatar save failed", error.message);
     return NextResponse.json({ error: "Could not save photo." }, { status: 500 });
   }
 
   revalidatePath("/me");
+  revalidatePath("/events");
   const handle = publicAthleteHandle(profile);
   if (handle) {
     revalidatePath(`/a/${handle}`);
   }
-  console.log("Avatar saved", user.id);
+  console.log("Avatar saved", user.id, profile.role);
   return NextResponse.json({ ok: true });
 }

@@ -5,7 +5,7 @@ import { ProductShell } from "@/components/product/ProductShell";
 export const metadata: Metadata = {
   title: "Privacy",
   description:
-    "What SkinBid stores: account fields, captures, GLB, bids, and PayPal email. We do not sell data.",
+    "What SkinBid stores: account fields, captures, 3D body, bids, and PayPal email. We do not sell data.",
 };
 
 export default async function PrivacyPage() {
@@ -32,9 +32,9 @@ export default async function PrivacyPage() {
         </section>
 
         <section>
-          <h2>Captures and GLB</h2>
+          <h2>Captures and 3D body</h2>
           <p>
-            Photos you upload so we can build the 3D body, and the GLB file we
+            Photos you upload so we can build the 3D body, and the body file we
             show on the event page.
           </p>
         </section>

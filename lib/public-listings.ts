@@ -1,20 +1,20 @@
 import { cache } from "react";
-import { FLOOR_CENTS, isAthleteSport } from "@/lib/config";
+import { displayAge, FLOOR_CENTS, isAthleteSport } from "@/lib/config";
 import { DEMO_SLUG } from "@/lib/demo-event";
 import { isReadyAvatar } from "@/lib/event-create";
-import { publicAthleteHandle } from "@/lib/handle";
+import { athleteMatchesHandle, publicAthleteHandle } from "@/lib/handle";
+import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { raceForListing } from "@/lib/live-listings";
 import {
   OFFICIAL_EVENTS,
   officialRacePath,
 } from "@/lib/official-events";
-import { createPublicSupabase } from "@/lib/supabase/admin";
 import {
   isPublishedEventStatus,
   PUBLISHED_EVENT_STATUSES,
 } from "@/lib/types";
 import { loadLeadCentsByZone } from "@/lib/zone-bids";
-import { featuredSlot } from "@/lib/zones";
+import { featuredSlot, openZoneLabels } from "@/lib/zones";
 
 // Drafts and cancelled stay private. Sitemap and public pages only see these.
 const PUBLISHED_STATUSES = PUBLISHED_EVENT_STATUSES;
@@ -34,6 +34,7 @@ export type PublicAthlete = {
   id: string;
   name: string;
   country: string | null;
+  age: number | null;
   social: string | null;
   socials: unknown;
   handle: string;
@@ -49,6 +50,7 @@ export type PublicAthlete = {
     city: string | null;
     sport: string | null;
     openCount: number;
+    openZones: string[];
     slotLabel: string;
     slotCents: number;
   } | null;
@@ -64,9 +66,9 @@ export type PublicEventSeo = {
   isDemo: boolean;
 };
 
-// Anon client only. A logged-in cookie would let an athlete see their own drafts.
+// Admin first so /a/[handle] still resolves when anon cannot select age.
 function publicDb() {
-  return createPublicSupabase();
+  return createAdminSupabase() ?? createPublicSupabase();
 }
 
 function openCountFrom(zones: ZoneStatusRow[] | null | undefined) {
@@ -125,10 +127,10 @@ async function loadAthleteRace(
 }
 
 const ATHLETE_PROFILE_SELECT =
-  "id, name, country, social, socials, sport, sport_detail, photo_url";
+  "id, name, country, social, socials, sport, sport_detail, photo_url, age, dob";
 const ATHLETE_PROFILE_SELECT_NO_PHOTO =
-  "id, name, country, social, socials, sport, sport_detail";
-const ATHLETE_PROFILE_SELECT_BASIC = "id, name, country, social";
+  "id, name, country, social, socials, sport, sport_detail, age, dob";
+const ATHLETE_PROFILE_SELECT_BASIC = "id, name, country, social, age, dob";
 
 type AthleteProfileRow = {
   id: string;
@@ -139,6 +141,8 @@ type AthleteProfileRow = {
   sport?: string | null;
   sport_detail?: string | null;
   photo_url?: string | null;
+  age?: number | null;
+  dob?: string | null;
 };
 
 async function loadAthleteRows(
@@ -148,6 +152,9 @@ async function loadAthleteRows(
     ATHLETE_PROFILE_SELECT,
     ATHLETE_PROFILE_SELECT_NO_PHOTO,
     ATHLETE_PROFILE_SELECT_BASIC,
+    "id, name, country, social, socials, sport, sport_detail, photo_url",
+    "id, name, country, social, socials, sport, sport_detail",
+    "id, name, country, social",
   ];
   for (const columns of selects) {
     const result = await db
@@ -192,7 +199,7 @@ export const loadAthleteByHandle = cache(async (rawHandle: string) => {
   }
 
   const rows = await loadAthleteRows(db);
-  const profile = rows.find((row) => publicAthleteHandle(row) === handle);
+  const profile = rows.find((row) => athleteMatchesHandle(row, handle));
   if (!profile) {
     return null;
   }
@@ -229,6 +236,7 @@ export const loadAthleteByHandle = cache(async (rawHandle: string) => {
     id: profile.id,
     name: profile.name?.trim() || "Athlete",
     country: profile.country,
+    age: displayAge(profile),
     social: profile.social,
     socials: profile.socials ?? null,
     handle,
@@ -245,6 +253,7 @@ export const loadAthleteByHandle = cache(async (rawHandle: string) => {
           city: live.city ?? null,
           sport: live.sport,
           openCount: openCountFrom(liveZones),
+          openZones: openZoneLabels(liveZones),
           slotLabel: slot.label,
           slotCents: slot.current_cents ?? FLOOR_CENTS,
         }
@@ -260,7 +269,7 @@ export async function listPublishedAthleteHandles() {
   }
   const { data } = await db
     .from("profiles")
-    .select("name, social")
+    .select("name, social, socials")
     .eq("role", "athlete");
 
   const seen = new Set<string>();

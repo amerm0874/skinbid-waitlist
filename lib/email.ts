@@ -2,17 +2,19 @@ import { Resend } from "resend";
 import { adminEmails } from "@/lib/auth";
 import { SITE } from "@/lib/config";
 import { centsToUsd } from "@/lib/money";
+import {
+  insertNotification,
+  isNoticeHref,
+  noticeCta,
+  type NoticeKind,
+  type NoticeRecord,
+} from "@/lib/notifications";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { isZoneName, ZONE_LABEL } from "@/lib/zones";
 
 export type EmailEventType =
-  | "bid_placed"
-  | "bid_outbid"
-  | "auction_closed"
-  | "event_morning"
+  | NoticeKind
   | "proof_submitted"
-  | "proof_approved"
-  | "proof_rejected"
   | "outreach";
 
 type Mail = {
@@ -24,8 +26,11 @@ type Mail = {
 
 const claimedInProcess = new Set<string>();
 
+export const RESEND_FROM_DEFAULT = "SkinBid <notify@skinbid.me>";
+export const RESEND_REPLY_TO = SITE.email;
+
 export function resendFrom() {
-  return process.env.RESEND_FROM?.trim() || `SkinBid <${SITE.email}>`;
+  return process.env.RESEND_FROM?.trim() || RESEND_FROM_DEFAULT;
 }
 
 export function createResend() {
@@ -48,12 +53,70 @@ function zoneLabel(name: string) {
   return isZoneName(name) ? ZONE_LABEL[name] : name;
 }
 
-function eventUrl(slug: string) {
-  return `${SITE.url}/e/${slug}`;
+function mailOrigin() {
+  const origin = SITE.url.replace(/\/$/, "");
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+    return "https://www.skinbid.me";
+  }
+  return origin;
 }
 
-function proofUrl(eventId: string) {
-  return `${SITE.url}/proof/${eventId}`;
+function productUrl(path: string) {
+  return `${mailOrigin()}${path}`;
+}
+
+function eventPath(slug: string) {
+  return `/e/${slug}`;
+}
+
+function logoDeskPath(slug: string) {
+  return `/e/${slug}/logo`;
+}
+
+function zoneNoticeEntity(slug: string, zoneName: string) {
+  return `${slug}:${zoneLabel(zoneName).toLowerCase()}`;
+}
+
+function proofPath(eventId: string) {
+  return `/proof/${eventId}`;
+}
+
+function isUnverifiedDomainError(message: string) {
+  const text = message.toLowerCase();
+  return (
+    text.includes("not verified") ||
+    text.includes("unverified domain") ||
+    text.includes("domain is not verified")
+  );
+}
+
+function fromAddresses() {
+  const fallback = process.env.RESEND_FROM?.trim();
+  const froms = [RESEND_FROM_DEFAULT];
+  if (fallback && fallback !== RESEND_FROM_DEFAULT) {
+    froms.push(fallback);
+  }
+  return froms;
+}
+
+function buttonMail(lines: string[], path: string, cta: string) {
+  const href = productUrl(path);
+  const text = [...lines, `${cta}: ${href}`].join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:24px;background:#0b0b0c;color:#f2f2f0;font-family:Arial,Helvetica,sans-serif;">
+${lines
+  .map(
+    (line) =>
+      `<p style="margin:0 0 12px;font-size:16px;line-height:1.4;">${escapeHtml(line)}</p>`,
+  )
+  .join("\n")}
+  <p style="margin:24px 0 0;">
+    <a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 20px;background:#c8f24e;color:#0b0b0c;text-decoration:none;font-weight:700;border-radius:4px;">${escapeHtml(cta)}</a>
+  </p>
+</body>
+</html>`;
+  return { text, html };
 }
 
 function mailContent(lines: string[], href?: string) {
@@ -140,23 +203,42 @@ async function deliver(mail: Mail, idempotencyKey: string) {
     console.log("Email skipped — no recipient", idempotencyKey);
     return { skipped: true as const };
   }
-  const { error } = await resend.emails.send(
-    {
-      from: resendFrom(),
-      to,
-      replyTo: SITE.email,
-      subject: mail.subject,
-      text: mail.text,
-      html: mail.html,
-    },
-    { idempotencyKey: idempotencyKey.slice(0, 256) },
-  );
-  if (error) {
+
+  const froms = fromAddresses();
+  for (const [index, from] of froms.entries()) {
+    const key =
+      index === 0
+        ? idempotencyKey.slice(0, 256)
+        : `${idempotencyKey}:from`.slice(0, 256);
+    const { error } = await resend.emails.send(
+      {
+        from,
+        to,
+        replyTo: RESEND_REPLY_TO,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+      },
+      { idempotencyKey: key },
+    );
+    if (!error) {
+      console.log("Email sent", idempotencyKey, to.join(","));
+      return { skipped: false as const };
+    }
+    const last = index === froms.length - 1;
+    if (!last && isUnverifiedDomainError(error.message)) {
+      console.log(
+        "Email domain unverified — using RESEND_FROM",
+        idempotencyKey,
+        error.message,
+      );
+      continue;
+    }
     console.log("Email failed", idempotencyKey, error.message);
     return { skipped: false as const, error: error.message };
   }
-  console.log("Email sent", idempotencyKey, to.join(","));
-  return { skipped: false as const };
+
+  return { skipped: false as const, error: "Email did not send." };
 }
 
 /** Sends via Resend, or logs when RESEND_API_KEY is missing. Never throws. */
@@ -210,29 +292,48 @@ export async function sendEmail(
   }
 }
 
-export async function notifyBidPlaced(input: {
-  bidId: string;
-  athleteId: string;
-  zoneName: string;
-  amountCents: number;
-  eventSlug: string;
+async function sendNoticeEmail(row: NoticeRecord) {
+  if (!isNoticeHref(row.href) || /whop\.com/i.test(row.href)) {
+    console.log("Email skipped — bad href", row.kind, row.href);
+    return;
+  }
+  const to = await userEmail(row.user_id);
+  if (!to) {
+    console.log("Email skipped — no email", row.kind, row.id);
+    return;
+  }
+  const lines = row.body.trim() ? [row.body.trim()] : [row.title];
+  await sendEmail(row.kind, row.id, {
+    to,
+    subject: row.title,
+    ...buttonMail(lines, row.href, noticeCta(row.href)),
+  });
+}
+
+async function notifyUser(input: {
+  userId: string;
+  kind: NoticeKind;
+  title: string;
+  body: string;
+  href: string;
+  entityId: string;
 }) {
   try {
-    const to = await userEmail(input.athleteId);
-    const zone = zoneLabel(input.zoneName);
-    const amount = centsToUsd(input.amountCents);
-    const href = eventUrl(input.eventSlug);
-    const copy = mailContent(
-      [`A brand placed a bid on ${zone}.`, `Amount: ${amount}`],
-      href,
-    );
-    await sendEmail("bid_placed", input.bidId, {
-      to: to ?? "",
-      subject: `Bid on ${zone}`,
-      ...copy,
-    });
+    const inserted = await insertNotification(input);
+    const row =
+      inserted.row ??
+      ({
+        id: `${input.kind}:${input.entityId}`,
+        user_id: input.userId,
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        href: input.href,
+        entity_id: input.entityId,
+      } satisfies NoticeRecord);
+    await sendNoticeEmail(row);
   } catch (error) {
-    console.log("notifyBidPlaced threw", error);
+    console.log("notifyUser threw", input.kind, input.entityId, error);
   }
 }
 
@@ -245,19 +346,34 @@ export async function notifyHeldBid(input: {
   eventSlug: string;
   previousBid?: { id: string; brandId: string } | null;
 }) {
-  await notifyBidPlaced({
-    bidId: input.bidId,
-    athleteId: input.athleteId,
-    zoneName: input.zoneName,
-    amountCents: input.amountCents,
-    eventSlug: input.eventSlug,
+  const zone = zoneLabel(input.zoneName);
+  const amount = centsToUsd(input.amountCents);
+  const href = eventPath(input.eventSlug);
+
+  await notifyUser({
+    userId: input.athleteId,
+    kind: "bid_held",
+    title: `Held · ${zone}`,
+    body: `${amount} held on ${zone}.`,
+    href,
+    entityId: zoneNoticeEntity(input.eventSlug, input.zoneName),
   });
+  await notifyUser({
+    userId: input.currentBrandId,
+    kind: "bid_held_brand",
+    title: `Held · ${zone}`,
+    body: `Your ${amount} bid is held on ${zone}. Upload the PNG now.`,
+    href: logoDeskPath(input.eventSlug),
+    entityId: zoneNoticeEntity(input.eventSlug, input.zoneName),
+  });
+
   if (input.previousBid && input.previousBid.brandId !== input.currentBrandId) {
     await notifyOutbid({
       previousBidId: input.previousBid.id,
       brandId: input.previousBid.brandId,
       zoneName: input.zoneName,
       newAmountCents: input.amountCents,
+      eventSlug: input.eventSlug,
     });
   }
 }
@@ -267,23 +383,47 @@ export async function notifyOutbid(input: {
   brandId: string;
   zoneName: string;
   newAmountCents: number;
+  eventSlug: string;
 }) {
-  try {
-    const to = await userEmail(input.brandId);
-    const zone = zoneLabel(input.zoneName);
-    const amount = centsToUsd(input.newAmountCents);
-    const copy = mailContent([
-      `You were outbid on ${zone}.`,
-      `The new bid is ${amount}.`,
-    ]);
-    await sendEmail("bid_outbid", input.previousBidId, {
-      to: to ?? "",
-      subject: `Outbid on ${zone}`,
-      ...copy,
-    });
-  } catch (error) {
-    console.log("notifyOutbid threw", error);
-  }
+  const zone = zoneLabel(input.zoneName);
+  const amount = centsToUsd(input.newAmountCents);
+  await notifyUser({
+    userId: input.brandId,
+    kind: "outbid",
+    title: `Outbid · ${zone}`,
+    body: `You were outbid on ${zone}. Held now: ${amount}. Refunded. That PNG will not print.`,
+    href: eventPath(input.eventSlug),
+    entityId: zoneNoticeEntity(input.eventSlug, input.zoneName),
+  });
+}
+
+export async function notifyAuctionWon(input: {
+  bidId: string;
+  athleteId: string;
+  brandId: string;
+  zoneName: string;
+  amountCents: number;
+  eventSlug: string;
+}) {
+  const zone = zoneLabel(input.zoneName);
+  const amount = centsToUsd(input.amountCents);
+  const href = eventPath(input.eventSlug);
+  await notifyUser({
+    userId: input.athleteId,
+    kind: "auction_won_athlete",
+    title: `Won · ${zone}`,
+    body: `${zone} closed at ${amount}. Print the mark.`,
+    href,
+    entityId: input.bidId,
+  });
+  await notifyUser({
+    userId: input.brandId,
+    kind: "auction_won_brand",
+    title: `Won · ${zone}`,
+    body: `Your ${amount} bid won ${zone}. Open the logo desk. Upload a transparent PNG. No chat.`,
+    href: logoDeskPath(input.eventSlug),
+    entityId: input.bidId,
+  });
 }
 
 export async function notifyAuctionClosed(input: {
@@ -295,80 +435,47 @@ export async function notifyAuctionClosed(input: {
   eventSlug: string;
   eventName: string;
 }) {
-  try {
-    const [athleteTo, brandTo] = await Promise.all([
-      userEmail(input.athleteId),
-      userEmail(input.brandId),
-    ]);
-    const zone = zoneLabel(input.zoneName);
-    const amount = centsToUsd(input.amountCents);
-    const href = eventUrl(input.eventSlug);
-    const messages: Mail[] = [];
-
-    if (athleteTo) {
-      messages.push({
-        to: athleteTo,
-        subject: `Auction closed — ${zone}`,
-        ...mailContent(
-          [
-            "Auction closed. Print the mark.",
-            `${input.eventName}: ${zone} closed at ${amount}.`,
-          ],
-          href,
-        ),
-      });
-    }
-    if (brandTo) {
-      messages.push({
-        to: brandTo,
-        subject: `You won ${zone}`,
-        ...mailContent(
-          [
-            `Your ${amount} bid won ${zone} on ${input.eventName}.`,
-            "The athlete wears your logo on event day.",
-          ],
-          href,
-        ),
-      });
-    }
-
-    await sendEmail("auction_closed", input.bidId, messages);
-  } catch (error) {
-    console.log("notifyAuctionClosed threw", error);
-  }
+  await notifyAuctionWon(input);
 }
 
-export async function notifyEventMorning(input: {
+export async function notifyRefundDone(input: {
+  bidId: string;
+  brandId: string;
+  zoneName: string;
+  amountCents: number;
+  eventSlug: string;
+}) {
+  const zone = zoneLabel(input.zoneName);
+  const amount = centsToUsd(input.amountCents);
+  await notifyUser({
+    userId: input.brandId,
+    kind: "refund_done",
+    title: `Refunded · ${zone}`,
+    body: `Your ${amount} bid on ${zone} was refunded. That PNG will not print.`,
+    href: eventPath(input.eventSlug),
+    entityId: zoneNoticeEntity(input.eventSlug, input.zoneName),
+  });
+}
+
+export async function notifyProofDue(input: {
   eventId: string;
   athleteId: string;
   eventName: string;
 }) {
-  try {
-    const to = await userEmail(input.athleteId);
-    const href = proofUrl(input.eventId);
-    await sendEmail("event_morning", input.eventId, {
-      to: to ?? "",
-      subject: `Wear it — ${input.eventName}`,
-      ...mailContent(
-        ["Wear it, then upload proof.", input.eventName],
-        href,
-      ),
-    });
-  } catch (error) {
-    console.log("notifyEventMorning threw", error);
-  }
+  await notifyUser({
+    userId: input.athleteId,
+    kind: "proof_due",
+    title: "Proof due",
+    body: `Wear the mark. Upload proof for ${input.eventName}.`,
+    href: proofPath(input.eventId),
+    entityId: input.eventId,
+  });
 }
 
-/**
- * Event-morning athlete mail. Call from cron later
- * (GET/POST /api/cron/event-morning with CRON_SECRET).
- * Not scheduled yet. Close mail already fires from settleEvent
- * — the same path that flips held bids to won.
- */
-export async function sendEventMorningReminders(now = new Date()) {
+export async function sendProofDueReminders(now = new Date()) {
   const admin = createAdminSupabase();
   if (!admin) {
-    console.log("Event morning skipped — no service role key");
+    console.log("Proof due skipped — no service role key");
     return { sent: 0, error: "No service role key" as const };
   }
 
@@ -385,7 +492,7 @@ export async function sendEventMorningReminders(now = new Date()) {
     .lte("date", dayEnd.toISOString());
 
   if (error) {
-    console.log("Event morning query failed", error.message);
+    console.log("Proof due query failed", error.message);
     return { sent: 0, error: error.message };
   }
 
@@ -408,7 +515,16 @@ export async function sendEventMorningReminders(now = new Date()) {
     if (!won?.length) {
       continue;
     }
-    await notifyEventMorning({
+    const { data: proof } = await admin
+      .from("proofs")
+      .select("id")
+      .eq("event_id", event.id)
+      .limit(1)
+      .maybeSingle();
+    if (proof) {
+      continue;
+    }
+    await notifyProofDue({
       eventId: event.id,
       athleteId: event.athlete_id,
       eventName: event.name,
@@ -416,7 +532,7 @@ export async function sendEventMorningReminders(now = new Date()) {
     sent += 1;
   }
 
-  console.log("Event morning job", { sent, events: events?.length ?? 0 });
+  console.log("Proof due job", { sent, events: events?.length ?? 0 });
   return { sent };
 }
 
@@ -428,13 +544,12 @@ export async function notifyProofSubmitted(input: {
   try {
     const to = adminEmails();
     const who = input.athleteName?.trim() || "An athlete";
-    const href = `${SITE.url}/admin`;
     await sendEmail("proof_submitted", input.proofId, {
       to,
       subject: `Proof submitted — ${input.eventName}`,
       ...mailContent(
         [`${who} submitted proof for ${input.eventName}.`],
-        href,
+        productUrl("/admin"),
       ),
     });
   } catch (error) {
@@ -445,26 +560,23 @@ export async function notifyProofSubmitted(input: {
 export async function notifyProofReviewed(input: {
   proofId: string;
   athleteId: string;
+  eventId: string;
   eventName: string;
+  eventSlug?: string;
   approved: boolean;
 }) {
-  try {
-    const to = await userEmail(input.athleteId);
-    const eventType = input.approved ? "proof_approved" : "proof_rejected";
-    const copy = input.approved
-      ? mailContent([`Your proof for ${input.eventName} was approved.`])
-      : mailContent([
-          `Your proof for ${input.eventName} was rejected.`,
-          "The winning bid is marked refunded. No payout.",
-        ]);
-    await sendEmail(eventType, input.proofId, {
-      to: to ?? "",
-      subject: input.approved
-        ? `Proof approved — ${input.eventName}`
-        : `Proof rejected — ${input.eventName}`,
-      ...copy,
-    });
-  } catch (error) {
-    console.log("notifyProofReviewed threw", error);
-  }
+  const href =
+    input.approved && input.eventSlug
+      ? eventPath(input.eventSlug)
+      : proofPath(input.eventId);
+  await notifyUser({
+    userId: input.athleteId,
+    kind: input.approved ? "proof_approved" : "proof_rejected",
+    title: input.approved ? "Proof approved" : "Proof rejected",
+    body: input.approved
+      ? `Proof approved for ${input.eventName}.`
+      : `Proof rejected for ${input.eventName}. No payout.`,
+    href,
+    entityId: input.proofId,
+  });
 }

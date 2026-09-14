@@ -7,25 +7,25 @@ import {
   continueWithGoogle,
   goThroughAuthCallback,
   PASSWORD_MIN,
-  rememberIntendedRole,
+  rememberAuthReturn,
 } from "@/lib/auth-client";
 import {
   looksLikeEmail,
   signupPath,
   type Role,
 } from "@/lib/config";
-import { createBrowserSupabase, googleAuthEnabled } from "@/lib/supabase/client";
+import { identifyUser } from "@/lib/analytics";
+import { createBrowserSupabase } from "@/lib/supabase/client";
+import { ContinueWithGoogle } from "@/components/product/ContinueWithGoogle";
 
 export default function LoginForm({
   role,
   next,
   errorNotice,
-  showGoogle,
 }: {
   role?: Role | null;
   next?: string | null;
   errorNotice?: string;
-  showGoogle: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -53,8 +53,8 @@ export default function LoginForm({
     }
 
     setBusy("password");
-    rememberIntendedRole(role);
-    const { error } = await supabase.auth.signInWithPassword({
+    rememberAuthReturn(role, next);
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: trimmed,
       password,
     });
@@ -66,6 +66,9 @@ export default function LoginForm({
       return;
     }
 
+    if (data.user) {
+      identifyUser(data.user.id, role);
+    }
     console.log("Signed in", role ?? "no role");
     goThroughAuthCallback(role, next);
   }
@@ -82,7 +85,13 @@ export default function LoginForm({
 
   return (
     <div className="form-shell">
-      <form onSubmit={handleSubmit}>
+      <ContinueWithGoogle
+        busy={busy === "google"}
+        disabled={busy !== null}
+        onClick={() => void handleGoogle()}
+      />
+
+      <form onSubmit={handleSubmit} className="mt-5">
         <label className="block">
           <span className="field-label">Email</span>
           <input
@@ -111,26 +120,15 @@ export default function LoginForm({
         <button
           type="submit"
           disabled={busy !== null}
-          className="btn btn-solid mt-5"
+          className="btn btn-outline mt-5"
         >
           {busy === "password" ? "Signing in…" : "Sign in"}
         </button>
       </form>
 
-      <p className="mt-4 text-[14px] text-muted">
-        <Link href={signupPath(role)}>Create account</Link>
-      </p>
-
-      {showGoogle && googleAuthEnabled() ? (
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={handleGoogle}
-          className="btn btn-ghost mt-5 w-full"
-        >
-          {busy === "google" ? "Opening Google…" : "Continue with Google"}
-        </button>
-      ) : null}
+      <Link href={signupPath(role, next)} className="btn btn-outline mt-4">
+        Create account
+      </Link>
 
       {message ? <p className="mt-4 text-[14px] text-muted">{message}</p> : null}
     </div>

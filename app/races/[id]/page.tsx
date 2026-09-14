@@ -1,16 +1,24 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
+import { AdvertiseBrandButton } from "@/components/product/AdvertiseBrandButton";
+import { EmptyState } from "@/components/product/EmptyState";
+import { EventMeet } from "@/components/product/RaceMeet";
+import { LiveSlotCard } from "@/components/product/LiveSlotCard";
+import { ProductShell } from "@/components/product/ProductShell";
 import { getSessionUser } from "@/lib/auth";
 import { sessionGateRedirect } from "@/lib/config";
-import { listingsForRace, loadLiveSlotCards } from "@/lib/live-listings";
+import {
+  findLiveRaceHub,
+  listingsForRace,
+  loadLiveSlotCards,
+  type LiveSlotCard as LiveSlotCardRow,
+} from "@/lib/live-listings";
 import {
   formatOfficialDate,
   listRacePath,
   loadOfficialEventByStartsOn,
   officialEventByStartsOn,
   OFFICIAL_EVENTS,
-  type OfficialEvent,
 } from "@/lib/official-events";
 import { withOfficialPageFacts } from "@/lib/official-og";
 import {
@@ -19,9 +27,6 @@ import {
   racePageTitle,
   shareMetadata,
 } from "@/lib/seo";
-import { LiveSlotCard } from "@/components/product/LiveSlotCard";
-import { RacePoster } from "@/components/product/RacePoster";
-import { ProductShell } from "@/components/product/ProductShell";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -34,128 +39,102 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
   const race = officialEventByStartsOn(id);
-  if (!race) {
-    return {
-      ...NO_OG_METADATA,
-      title: { absolute: "Not found | SkinBid" },
-    };
+  if (race) {
+    const dateLabel = formatOfficialDate(race.starts_on);
+    return shareMetadata(
+      racePageTitle(race.name, dateLabel),
+      racePageDescription({
+        name: race.name,
+        city: race.city,
+        country: race.country,
+        sport: race.sport,
+      }),
+      `/races/${race.starts_on}`,
+    );
   }
-  const dateLabel = formatOfficialDate(race.starts_on);
-  return shareMetadata(
-    racePageTitle(race.name, dateLabel),
-    racePageDescription({
-      name: race.name,
-      city: race.city,
-      country: race.country,
-      sport: race.sport,
-    }),
-    `/races/${race.starts_on}`,
-  );
+  return {
+    ...NO_OG_METADATA,
+    title: { absolute: "Race | SkinBid" },
+  };
 }
 
 export default async function RacePage({ params }: PageProps) {
   const { id } = await params;
   const { supabase, user, profile } = await getSessionUser();
-  const found = await loadOfficialEventByStartsOn(supabase, id);
-  if (!found) {
+  const live = await loadLiveSlotCards(supabase);
+  const official = await loadOfficialEventByStartsOn(supabase, id);
+  const hub = official
+    ? null
+    : findLiveRaceHub(live, id);
+
+  if (!official && !hub) {
     notFound();
   }
 
-  const gate = sessionGateRedirect(user, profile, `/races/${found.starts_on}`);
+  const gate = sessionGateRedirect(user, profile, `/races/${id}`);
   if (gate) {
     redirect(gate);
   }
 
-  const [races, live] = await Promise.all([
-    withOfficialPageFacts([found]),
-    loadLiveSlotCards(supabase),
-  ]);
-  const race = races[0] ?? found;
   const isAthlete = profile?.role === "athlete";
-  const participating = listingsForRace(live, race);
+  let name: string;
+  let sport: string | null;
+  let city: string | null;
+  let date: string;
+  let participating: LiveSlotCardRow[];
+  let listHref: string | null = null;
+
+  if (official) {
+    const [withFacts] = await withOfficialPageFacts([official]);
+    const race = withFacts ?? official;
+    name = race.name;
+    sport = race.combat_subtype
+      ? `${race.sport} · ${race.combat_subtype}`
+      : race.sport;
+    city = race.city;
+    date = race.starts_on;
+    participating = listingsForRace(live, race);
+    listHref = isAthlete ? listRacePath(race.starts_on) : null;
+  } else if (hub) {
+    name = hub.name;
+    sport = hub.sport;
+    city = hub.city;
+    date = hub.date;
+    participating = hub.listings;
+    listHref = isAthlete ? "/new" : null;
+  } else {
+    notFound();
+  }
+
+  const advertiseSlug =
+    participating.length === 1 ? participating[0]?.slug : null;
 
   return (
     <ProductShell email={user?.email} role={profile?.role}>
       <div className="page-stack">
-        <div className="race-file">
-          <RacePoster
-            sport={race.sport}
-            startsOn={race.starts_on}
-            photoUrl={race.og_image_url}
-            eager
-          />
-          <RaceFacts race={race} />
-          {isAthlete ? (
-            <Link href={listRacePath(race.starts_on)} className="cta-press">
-              <span className="cta-press-plate" aria-hidden="true" />
-              <span className="cta-press-face">Participate</span>
-            </Link>
-          ) : null}
-        </div>
+        <EventMeet name={name} sport={sport} city={city} date={date} />
 
-        <section>
-          <h2 className="slot-board-kicker">Participating</h2>
-          {participating.length === 0 ? (
-            <p className="mt-3 text-[14px] text-muted">No one is participating yet.</p>
-          ) : (
-            <ul className="live-body-list mt-3">
-              {participating.map((card) => (
-                <li key={card.id}>
-                  <LiveSlotCard card={card} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        {advertiseSlug ? (
+          <AdvertiseBrandButton slug={advertiseSlug} />
+        ) : null}
+
+        {participating.length > 0 ? (
+          <ul className="live-body-list">
+            {participating.map((card, index) => (
+              <li key={card.id}>
+                <LiveSlotCard card={card} eager={index < 2} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState
+            line="No athletes on this race yet."
+            toEvents={isAthlete}
+            href={listHref ?? "/events"}
+            linkLabel="Be first"
+          />
+        )}
       </div>
     </ProductShell>
   );
-}
-
-function RaceFacts({ race }: { race: OfficialEvent }) {
-  const sport = race.combat_subtype
-    ? `${race.sport} · ${race.combat_subtype}`
-    : race.sport;
-  const rows = [
-    { label: "Name", value: race.name, title: true },
-    { label: "Date", value: formatOfficialDate(race.starts_on) },
-    { label: "City", value: race.city },
-    { label: "Country", value: race.country },
-    { label: "Venue", value: race.venue },
-    { label: "Sport", value: sport },
-    {
-      label: "Official",
-      value: officialLinkLabel(race.official_url),
-      href: race.official_url,
-    },
-  ].filter((row) => Boolean(row.value?.trim()));
-
-  return (
-    <dl className="race-facts">
-      {rows.map((row) => (
-        <div key={row.label} className="race-fact">
-          <dt>{row.label}</dt>
-          <dd>
-            {row.title ? (
-              <h1 className="race-fact-name display">{row.value}</h1>
-            ) : null}
-            {!row.title && row.href ? (
-              <a href={row.href} target="_blank" rel="noreferrer">
-                {row.value}
-              </a>
-            ) : null}
-            {!row.title && !row.href ? row.value : null}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function officialLinkLabel(url: string) {
-  try {
-    return new URL(url).host.replace(/^www\./, "");
-  } catch {
-    return "Official race site";
-  }
 }

@@ -13,7 +13,10 @@ import EventHud from "@/components/landing/EventHud";
 import SlotPitchCard from "@/components/landing/SlotPitchCard";
 import { DEMO_ATHLETES, SLOT_LABELS, type Gender, type SlotId } from "@/lib/demo-landing";
 import {
-  DRACO_PATH,
+  ensureModelViewer,
+  guardModelViewerScale,
+} from "@/lib/ensure-model-viewer";
+import {
   MODEL_SRC,
   POSTER_SRC,
 } from "@/lib/landing-media";
@@ -27,32 +30,6 @@ type BodyFrame = {
   size: { x: number; y: number; z: number };
   center: { x: number; y: number; z: number };
 };
-
-type ModelViewerCtor = typeof ModelViewerElement & {
-  dracoDecoderLocation: string;
-};
-
-let modelViewerPromise: Promise<ModelViewerCtor> | null = null;
-
-// Start the 3D library now, not after the first paint. Point Draco at our
-// local decoder so the page does not wait on Google's CDN.
-function ensureModelViewer() {
-  if (!modelViewerPromise) {
-    modelViewerPromise = import(
-      /* webpackPreload: true */
-      "@google/model-viewer"
-    ).then((mod) => {
-      const El = mod.ModelViewerElement as ModelViewerCtor;
-      El.dracoDecoderLocation = DRACO_PATH;
-      return El;
-    });
-  }
-  return modelViewerPromise;
-}
-
-if (typeof window !== "undefined") {
-  void ensureModelViewer();
-}
 
 const TARGET_HEIGHT_M = 1.7;
 const STUDIO = "#111111";
@@ -250,6 +227,9 @@ export default function BodyViewerSection() {
       stopViewer(previous);
     }
     viewerRef.current = node;
+    if (node) {
+      guardModelViewerScale(node);
+    }
   }, []);
 
   function showSlotOnBody(slot: SlotId) {
@@ -285,7 +265,7 @@ export default function BodyViewerSection() {
   function openSlotsList() {
     setActiveSlot(undefined);
     setSlotsOpen(true);
-    console.log("Advertise your brand opened slots");
+    console.log("Opened preview slots");
   }
 
   function closeSlotsList() {
@@ -401,6 +381,7 @@ export default function BodyViewerSection() {
       if (!loadedViewer.isConnected) {
         return;
       }
+      guardModelViewerScale(loadedViewer);
       loadedViewer.scale = `${nextScale} ${nextScale} ${nextScale}`;
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -609,6 +590,7 @@ export default function BodyViewerSection() {
 
           <model-viewer
             ref={bindViewer}
+            suppressHydrationWarning
             src={MODEL_SRC[selected]}
             poster={POSTER_SRC[selected]}
             loading="eager"

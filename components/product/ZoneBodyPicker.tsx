@@ -9,10 +9,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { DRACO_PATH, MODEL_SRC, POSTER_SRC } from "@/lib/landing-media";
+import { ensureModelViewer, guardModelViewerScale } from "@/lib/ensure-model-viewer";
+import { MODEL_SRC, POSTER_SRC } from "@/lib/landing-media";
 import {
   defaultHitForZone,
-  ZONE_HITS,
+  nearestHit,
+  slotWorld,
   type ZoneHit,
 } from "@/lib/zone-views";
 import { ZONE_LABEL, ZONE_NAMES, type ZoneName } from "@/lib/zones";
@@ -33,30 +35,6 @@ type TurnHandle = {
   cancel: () => void;
 };
 
-type ModelViewerCtor = typeof ModelViewerElement & {
-  dracoDecoderLocation: string;
-};
-
-let modelViewerPromise: Promise<ModelViewerCtor> | null = null;
-
-function ensureModelViewer() {
-  if (!modelViewerPromise) {
-    modelViewerPromise = import(
-      /* webpackPreload: true */
-      "@google/model-viewer"
-    ).then((mod) => {
-      const El = mod.ModelViewerElement as ModelViewerCtor;
-      El.dracoDecoderLocation = DRACO_PATH;
-      return El;
-    });
-  }
-  return modelViewerPromise;
-}
-
-if (typeof window !== "undefined") {
-  void ensureModelViewer();
-}
-
 const TARGET_HEIGHT_M = 1.7;
 const STUDIO = "#111111";
 const HOME_PHI = 75;
@@ -66,7 +44,6 @@ const IDLE_ORBIT_MAX = `auto ${HOME_PHI}deg ${HOME_RADIUS}m`;
 const TRAVEL_ORBIT_MIN = "auto 50deg 2.1m";
 const TRAVEL_ORBIT_MAX = "auto 105deg 6.5m";
 const TURN_MS = 400;
-const SLOT_HIT_M = 0.34;
 
 function homeTargetY(frame: BodyFrame) {
   return frame.center.y - frame.size.y / 2 + 0.52 * frame.size.y;
@@ -227,14 +204,6 @@ function stopViewer(viewer: ModelViewerElement) {
   }
 }
 
-function slotWorld(hit: ZoneHit, frame: BodyFrame) {
-  return {
-    x: frame.center.x + (hit.x * frame.size.x) / 2,
-    y: frame.center.y - frame.size.y / 2 + hit.y * frame.size.y,
-    z: frame.center.z + (hit.z * frame.size.z) / 2,
-  };
-}
-
 function hitCameraPose(hit: ZoneHit, frame: BodyFrame): OrbitPose {
   const world = slotWorld(hit, frame);
   const lookY = homeTargetY(frame) * 0.25 + world.y * 0.75;
@@ -250,22 +219,6 @@ function hitCameraPose(hit: ZoneHit, frame: BodyFrame): OrbitPose {
   };
 }
 
-function nearestHit(frame: BodyFrame, point: { x: number; y: number; z: number }) {
-  let best: ZoneHit | undefined;
-  let bestDist = SLOT_HIT_M;
-  for (const hit of ZONE_HITS) {
-    const pos = slotWorld(hit, frame);
-    const dx = pos.x - point.x;
-    const dy = pos.y - point.y;
-    const dz = pos.z - point.z;
-    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = hit;
-    }
-  }
-  return best;
-}
 
 export default function ZoneBodyPicker({
   zones,
@@ -310,6 +263,9 @@ export default function ZoneBodyPicker({
       stopViewer(previous);
     }
     viewerRef.current = node;
+    if (node) {
+      guardModelViewerScale(node);
+    }
   }, []);
 
   function pickHit(hit: ZoneHit) {
@@ -329,6 +285,9 @@ export default function ZoneBodyPicker({
     turnRef.current?.cancel();
 
     try {
+      if (typeof viewer.resetTurntableRotation === "function") {
+        viewer.resetTurntableRotation(0);
+      }
       freezeViewer(viewer);
       if (focus) {
         const pose = hitCameraPose(focus, frame);
@@ -419,6 +378,7 @@ export default function ZoneBodyPicker({
       if (!loadedViewer.isConnected) {
         return;
       }
+      guardModelViewerScale(loadedViewer);
       loadedViewer.scale = `${nextScale} ${nextScale} ${nextScale}`;
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -582,6 +542,7 @@ export default function ZoneBodyPicker({
 
         <model-viewer
           ref={bindViewer}
+          suppressHydrationWarning
           src={MODEL_SRC.male}
           poster={POSTER_SRC.male}
           loading="eager"

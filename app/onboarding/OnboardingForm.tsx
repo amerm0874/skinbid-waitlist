@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { clearAuthReturn } from "@/lib/auth-client";
 import {
   ATHLETE_GENDERS,
   BRAND_CATEGORIES,
@@ -34,6 +35,7 @@ import {
   type SocialAccount,
   type SocialNetwork,
 } from "@/lib/socials";
+import { captureEvent, identifyUser } from "@/lib/analytics";
 import { dbErrorMessage } from "@/lib/db-error";
 import { uploadBrandLogo } from "@/lib/uploads";
 import type { Profile } from "@/lib/types";
@@ -63,11 +65,13 @@ export default function OnboardingForm({
   email,
   profile,
   intendedRole,
+  next: returnTo,
 }: {
   userId: string;
   email: string;
   profile: Profile | null;
   intendedRole?: Role | null;
+  next?: string | null;
 }) {
   const router = useRouter();
   const roleLocked = Boolean(profile?.role);
@@ -211,6 +215,7 @@ export default function OnboardingForm({
           brand_category: role === "brand" ? brandCategory : "",
           logo_url: logoUrl,
           paypal_email: role === "athlete" ? paypal : "",
+          next: returnTo,
         }),
       });
       let payload: { error?: string; next?: string } = {};
@@ -226,8 +231,13 @@ export default function OnboardingForm({
         throw payload;
       }
 
-      console.log("Profile saved", role, email);
+      console.log("Profile saved", role);
+      if (!roleLocked) {
+        captureEvent("signup_role", { role });
+      }
+      identifyUser(userId, role);
       window.localStorage.removeItem(INTENDED_ROLE_KEY);
+      clearAuthReturn();
       const next =
         payload.next ||
         pathAfterProfile({

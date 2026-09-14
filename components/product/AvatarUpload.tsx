@@ -2,28 +2,33 @@
 
 import { useRef, useState } from "react";
 import { avatarClientError, uploadAvatarPhoto } from "@/lib/photo";
+import { logoClientError } from "@/lib/logo";
+import { uploadBrandLogo } from "@/lib/uploads";
 
 function nameInitial(name: string) {
   const letter = name.trim().slice(0, 1);
-  return letter ? letter.toUpperCase() : "A";
+  return letter ? letter.toUpperCase() : "?";
 }
 
 export function AvatarUpload({
   userId,
   name,
   initialUrl,
+  kind = "photo",
 }: {
   userId: string;
   name: string;
   initialUrl: string | null;
+  kind?: "photo" | "logo";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState(initialUrl);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const isLogo = kind === "logo";
 
   async function handleFile(file: File) {
-    const invalid = avatarClientError(file);
+    const invalid = isLogo ? logoClientError(file) : avatarClientError(file);
     if (invalid) {
       setErrorMessage(invalid);
       return;
@@ -31,11 +36,15 @@ export function AvatarUpload({
     setBusy(true);
     setErrorMessage("");
     try {
-      const publicUrl = await uploadAvatarPhoto(userId, file);
+      const publicUrl = isLogo
+        ? await uploadBrandLogo(userId, file)
+        : await uploadAvatarPhoto(userId, file);
       const response = await fetch("/api/profile/photo", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photo_url: publicUrl }),
+        body: JSON.stringify(
+          isLogo ? { logo_url: publicUrl } : { photo_url: publicUrl },
+        ),
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as {
@@ -43,7 +52,7 @@ export function AvatarUpload({
         };
         throw new Error(payload.error || "Could not save photo.");
       }
-      console.log("Avatar updated");
+      console.log(isLogo ? "Brand logo updated" : "Avatar updated");
       setUrl(publicUrl);
     } catch (error) {
       console.log("Avatar upload failed", error);
@@ -62,7 +71,7 @@ export function AvatarUpload({
         className="avatar-upload"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
-        aria-label={url ? "Change avatar" : "Add avatar"}
+        aria-label={url ? "Change photo" : "Add photo"}
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -79,7 +88,7 @@ export function AvatarUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept={isLogo ? "image/png" : "image/jpeg,image/png,image/webp"}
         className="sr-only"
         onChange={(event) => {
           const file = event.target.files?.[0] ?? null;

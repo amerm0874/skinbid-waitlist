@@ -1,22 +1,25 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { resetUser } from "@/lib/analytics";
+import { clearBrowserAuth } from "@/lib/auth-client";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 
 export function SignOutButton() {
-  const router = useRouter();
-
   async function signOut() {
     const supabase = createBrowserSupabase();
     if (supabase) {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: "global" });
+      if (error) {
+        console.log("Sign out failed", error.message);
+      }
     }
-    router.push("/");
-    router.refresh();
+    resetUser();
+    clearBrowserAuth();
+    window.location.replace("/auth/signout");
   }
 
   return (
-    <button type="button" onClick={signOut}>
+    <button type="button" onClick={() => void signOut()}>
       Sign out
     </button>
   );

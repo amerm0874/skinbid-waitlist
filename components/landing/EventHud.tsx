@@ -10,7 +10,6 @@ import {
   countdownParts,
   demoEventDateIso,
   getSlotBid,
-  paidCents,
 } from "@/lib/demo-landing";
 import { centsToUsd } from "@/lib/money";
 
@@ -30,7 +29,7 @@ type Props = {
   onCloseSlots: () => void;
 };
 
-// Overlay chrome for the waitlist 3D preview.
+// Overlay chrome for the landing 3D preview.
 export default function EventHud({
   athlete,
   slots,
@@ -65,24 +64,13 @@ export default function EventHud({
           <h2 className="hud-title display">
             Sponsor my next {athlete.sport} race
           </h2>
-          <p className="hud-paid">
-            I&apos;m paid {centsToUsd(paidCents(athlete))} to race {athlete.sport}.
-          </p>
+          <p className="hud-paid">Preview. Not a live auction.</p>
           <p className="hud-next">
-            My next race is{" "}
-            <a
-              href={athlete.eventHref}
-              className="hud-event"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {athlete.event}
-            </a>
-            .
+            Next race: {athlete.event}.
           </p>
           <p className="hud-meta">
             <a href="#how" className="hud-how">
-              How it works?
+              How it works
             </a>
           </p>
         </div>
@@ -158,7 +146,7 @@ export default function EventHud({
                 onClick={onOpenSlots}
               >
                 <span className="press-btn-plate" aria-hidden="true" />
-                <span className="press-btn-face">Advertise your brand</span>
+                <span className="press-btn-face">Open the preview</span>
               </button>
             </div>
           )}
@@ -215,15 +203,8 @@ export default function EventHud({
               <img src={athlete.photo} alt="" />
             </span>
             <span className="hud-athlete-copy">
-              <span className="hud-social">
-                I&apos;m {athlete.social}{" "}
-                <span className="hud-social-arrow" aria-hidden="true">
-                  ↗
-                </span>
-              </span>
-              <span className="hud-social-meta">
-                ({athlete.followers} on Instagram)
-              </span>
+              <span className="hud-social">Demo athlete</span>
+              <span className="hud-social-meta">Preview. Not a live profile.</span>
             </span>
           </Link>
         </div>

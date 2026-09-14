@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { destinationAfterAuth, parseRole, type Role } from "@/lib/config";
-import { loadOwnPayout } from "@/lib/payout";
+import { safeReturnPath } from "@/lib/launch";
+import { isLogoDeskNext } from "@/lib/logo";
 import { loadProfileRow } from "@/lib/profile";
 
 export async function destinationForSession(
@@ -10,10 +11,13 @@ export async function destinationForSession(
   next?: string | null,
 ) {
   const profile = await loadProfileRow(supabase, userId);
-  const payout = profile ? await loadOwnPayout(supabase, userId) : null;
+  const returnTo = safeReturnPath(next ?? null);
+  if (returnTo && isLogoDeskNext(returnTo)) {
+    return returnTo;
+  }
   return destinationAfterAuth(
-    profile ? { ...profile, ...payout } : null,
+    profile,
     parseRole(profile?.role) ?? role,
-    next,
+    returnTo,
   );
 }

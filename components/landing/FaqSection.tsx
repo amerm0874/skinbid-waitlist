@@ -6,7 +6,7 @@ const ITEMS = [
   },
   {
     q: "When does the athlete get paid?",
-    a: "After the athlete delivers the photos. We check them, then payout.",
+    a: "After the athlete delivers the photos. We check them, then payout. You keep 80%. SkinBid keeps 20%.",
   },
   {
     q: "What if they no-show?",
@@ -22,7 +22,7 @@ const ITEMS = [
   },
   {
     q: "Who is this for?",
-    a: "Athletes with a real event. Brands that want that photo.",
+    a: "Athletes with a dated race and an audience brands can see. Brands that want that photo, from $100.",
   },
   {
     q: "Can a brand reuse the athlete’s face later?",

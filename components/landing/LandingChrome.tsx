@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/Wordmark";
-import { SITE } from "@/lib/config";
 
 const FOOTER_LINKS = [
   { href: "/", label: "Home" },
@@ -16,6 +15,7 @@ export function LandingNav() {
       <Wordmark />
       <nav className="nav-links">
         <Link href="/events">Events</Link>
+        <Link href="/signup?role=athlete">List my race</Link>
         <Link href="/login">Log in</Link>
       </nav>
     </header>
@@ -29,7 +29,7 @@ export function LandingFooter() {
         <div>
           <Wordmark size="footer" />
           <p className="mt-3 max-w-[22ch] text-[13px] leading-5 text-muted">
-            Race-day body slots. Brands bid.
+            Your next race already has ad space.
           </p>
         </div>
         <nav
@@ -41,9 +41,6 @@ export function LandingFooter() {
               {link.label}
             </Link>
           ))}
-          <a href={`mailto:${SITE.email}`} className="hover:text-ink">
-            {SITE.email}
-          </a>
         </nav>
       </div>
     </footer>

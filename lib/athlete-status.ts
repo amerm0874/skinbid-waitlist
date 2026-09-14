@@ -55,7 +55,7 @@ export function athleteEventStatus(input: {
   if (input.status === "draft") {
     return {
       phase: "draft",
-      line: "Finish the listing.",
+      line: "Your listing isn’t public.",
       action: { href: "/new", label: "Finish listing" },
     };
   }

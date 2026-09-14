@@ -4,7 +4,7 @@
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- Waitlist (public form on /waitlist only)
+-- Waitlist (kept). No public form. Inbox still reads these rows.
 -- ---------------------------------------------------------------------------
 create table if not exists public.waitlist (
   id uuid primary key default gen_random_uuid(),
@@ -294,6 +294,12 @@ create table if not exists public.events (
 
 alter table public.events add column if not exists sport_detail text;
 alter table public.events add column if not exists country text;
+-- Winner picks tattoo vs sticker only if the athlete offered both.
+alter table public.events add column if not exists offer_tattoo boolean not null default true;
+alter table public.events add column if not exists offer_sticker boolean not null default true;
+alter table public.events drop constraint if exists events_offer_mark_check;
+alter table public.events add constraint events_offer_mark_check
+  check (offer_tattoo or offer_sticker);
 
 create index if not exists events_status_date_idx on public.events (status, date);
 create index if not exists events_athlete_idx on public.events (athlete_id);
@@ -457,13 +463,13 @@ on conflict (starts_on) do update set
   end;
 
 -- ---------------------------------------------------------------------------
--- Zones (12 named parts, no custom names)
+-- Zones (13 named parts, no custom names). abs is midline, not L/R.
 -- ---------------------------------------------------------------------------
 create table if not exists public.zones (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events (id) on delete cascade,
   name text not null check (name in (
-    'chest_l','chest_r','shoulder_l','shoulder_r',
+    'chest_l','chest_r','abs','shoulder_l','shoulder_r',
     'bicep_l','bicep_r','forearm_l','forearm_r',
     'back_l','back_r','thigh_l','thigh_r'
   )),
@@ -563,11 +569,24 @@ create table if not exists public.bids (
 
 alter table public.bids add column if not exists polar_checkout_id text;
 alter table public.bids add column if not exists polar_order_id text;
+alter table public.bids add column if not exists whop_checkout_id text;
+alter table public.bids add column if not exists whop_payment_id text;
+-- Per won zone. Not a brand-wide profile logo.
+alter table public.bids add column if not exists logo_url text;
+alter table public.bids add column if not exists mark_kind text;
+alter table public.bids add column if not exists post_rules text;
+alter table public.bids drop constraint if exists bids_mark_kind_check;
+alter table public.bids add constraint bids_mark_kind_check
+  check (mark_kind is null or mark_kind in ('tattoo', 'sticker'));
+alter table public.bids drop constraint if exists bids_post_rules_check;
+alter table public.bids add constraint bids_post_rules_check
+  check (post_rules is null or char_length(post_rules) <= 280);
 
 create index if not exists bids_zone_status_idx on public.bids (zone_id, status);
 create index if not exists bids_zone_created_idx on public.bids (zone_id, created_at desc);
 create index if not exists bids_payment_idx on public.bids (dodo_payment_id);
 create index if not exists bids_polar_checkout_idx on public.bids (polar_checkout_id);
+create index if not exists bids_whop_checkout_idx on public.bids (whop_checkout_id);
 
 alter table public.bids enable row level security;
 
@@ -604,6 +623,7 @@ create policy "bids_insert_brand"
       where z.id = zone_id
         and z.status = 'open'
         and e.status = 'live'
+        and e.athlete_id <> auth.uid()
     )
   );
 
@@ -650,8 +670,41 @@ create table if not exists public.captures (
   athlete_id uuid not null references public.profiles (id) on delete cascade,
   paths text[] not null default '{}',
   status text not null default 'pending',
+  model_paid boolean not null default false,
+  whop_payment_id text,
   created_at timestamptz not null default now()
 );
+
+alter table public.captures add column if not exists model_paid boolean not null default false;
+alter table public.captures add column if not exists whop_payment_id text;
+
+-- Athletes cannot mark the $50 3D model fee paid. Webhook (service role) can.
+create or replace function public.captures_lock_model_paid()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if TG_OP = 'INSERT' then
+    if auth.role() is distinct from 'service_role' then
+      NEW.model_paid := false;
+      NEW.whop_payment_id := null;
+    end if;
+    return NEW;
+  end if;
+  if auth.role() is distinct from 'service_role' then
+    NEW.model_paid := OLD.model_paid;
+    NEW.whop_payment_id := OLD.whop_payment_id;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists captures_lock_model_paid on public.captures;
+create trigger captures_lock_model_paid
+  before insert or update on public.captures
+  for each row
+  execute function public.captures_lock_model_paid();
 
 alter table public.captures drop constraint if exists captures_status_check;
 alter table public.captures add constraint captures_status_check
@@ -823,6 +876,86 @@ create table if not exists public.email_sends (
 
 alter table public.email_sends enable row level security;
 
+-- In-app notices. Service role inserts; the signed-in user reads and marks read.
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  kind text not null
+    check (kind in (
+      'bid_held',
+      'bid_held_brand',
+      'outbid',
+      'won',
+      'auction_won_athlete',
+      'auction_won_brand',
+      'proof_due',
+      'proof_approved',
+      'proof_rejected',
+      'refund_done'
+    )),
+  title text not null,
+  body text not null default '',
+  href text not null
+    check (href ~ '^/(e|proof)/'),
+  entity_id text not null,
+  read_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (user_id, kind, entity_id)
+);
+
+do $$
+declare
+  rec record;
+begin
+  for rec in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.notifications'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%kind%'
+  loop
+    execute format('alter table public.notifications drop constraint %I', rec.conname);
+  end loop;
+end $$;
+
+alter table public.notifications add constraint notifications_kind_check
+  check (kind in (
+    'bid_held',
+    'bid_held_brand',
+    'outbid',
+    'won',
+    'auction_won_athlete',
+    'auction_won_brand',
+    'proof_due',
+    'proof_approved',
+    'proof_rejected',
+    'refund_done'
+  ));
+
+create index if not exists notifications_user_created_idx
+  on public.notifications (user_id, created_at desc);
+create index if not exists notifications_user_unread_idx
+  on public.notifications (user_id)
+  where read_at is null;
+
+alter table public.notifications enable row level security;
+
+drop policy if exists "notifications_select_own" on public.notifications;
+create policy "notifications_select_own"
+  on public.notifications for select
+  to authenticated
+  using (user_id = auth.uid());
+
+drop policy if exists "notifications_update_own" on public.notifications;
+create policy "notifications_update_own"
+  on public.notifications for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+grant select, update on public.notifications to authenticated;
+revoke insert, delete on public.notifications from anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Storage
 -- ---------------------------------------------------------------------------
@@ -872,3 +1005,65 @@ create policy "storage_own_read_private"
     bucket_id in ('captures', 'proofs')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- Google and a magic link on the same email should keep one profile.
+create or replace function public.reuse_profile_for_email(
+  p_user_id uuid,
+  p_email text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  src_id uuid;
+begin
+  if p_email is null or btrim(p_email) = '' then
+    return;
+  end if;
+  if exists (select 1 from public.profiles where id = p_user_id) then
+    return;
+  end if;
+
+  select u.id
+    into src_id
+  from auth.users u
+  join public.profiles p on p.id = u.id
+  where lower(u.email) = lower(btrim(p_email))
+    and u.id <> p_user_id
+  order by u.created_at asc
+  limit 1;
+
+  if src_id is null then
+    return;
+  end if;
+
+  insert into public.profiles (
+    id, role, name, country, dob, age, gender, sport, sport_detail,
+    social, socials, brand_category, website, logo_url, photo_url, created_at
+  )
+  select
+    p_user_id, role, name, country, dob, age, gender, sport, sport_detail,
+    social, socials, brand_category, website, logo_url, photo_url, created_at
+  from public.profiles
+  where id = src_id;
+
+  update public.events set athlete_id = p_user_id where athlete_id = src_id;
+  update public.bids set brand_id = p_user_id where brand_id = src_id;
+  update public.captures set athlete_id = p_user_id where athlete_id = src_id;
+  update public.avatars set athlete_id = p_user_id where athlete_id = src_id;
+  update public.notifications set user_id = p_user_id where user_id = src_id;
+
+  insert into public.athlete_payouts (athlete_id, payout_rail, payout_account)
+  select p_user_id, payout_rail, payout_account
+  from public.athlete_payouts
+  where athlete_id = src_id
+  on conflict (athlete_id) do update
+    set payout_rail = excluded.payout_rail,
+        payout_account = excluded.payout_account;
+end;
+$$;
+
+revoke all on function public.reuse_profile_for_email(uuid, text) from public, anon, authenticated;
+grant execute on function public.reuse_profile_for_email(uuid, text) to service_role;

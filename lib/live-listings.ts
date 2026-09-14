@@ -1,7 +1,15 @@
-import { athleteSportLabel, FLOOR_CENTS } from "@/lib/config";
+import { normalizeEventSlug } from "@/lib/auction";
+import { athleteSportLabel, displayAge, FLOOR_CENTS } from "@/lib/config";
+import { loadAthleteProfileClipUrls } from "@/lib/capture-state";
 import { isReadyAvatar } from "@/lib/event-create";
-import { OFFICIAL_EVENTS, type OfficialEvent } from "@/lib/official-events";
+import { publicAthleteHandle } from "@/lib/handle";
+import {
+  OFFICIAL_EVENTS,
+  officialRacePath,
+  type OfficialEvent,
+} from "@/lib/official-events";
 import type { createServerSupabase } from "@/lib/supabase/server";
+import { featuredSlot } from "@/lib/zones";
 import { loadLeadCentsByZone } from "@/lib/zone-bids";
 
 type Db = NonNullable<Awaited<ReturnType<typeof createServerSupabase>>>;
@@ -15,9 +23,13 @@ type ZoneRow = {
 type ProfileRow = {
   id: string;
   name: string | null;
+  social?: string | null;
+  socials?: unknown;
   sport?: string | null;
   sport_detail?: string | null;
   photo_url?: string | null;
+  age?: number | null;
+  dob?: string | null;
 };
 
 export type LiveSlotCard = {
@@ -29,9 +41,23 @@ export type LiveSlotCard = {
   slug: string;
   athleteId: string;
   athleteName: string;
+  handle: string | null;
   photoUrl: string | null;
+  clipUrl: string | null;
+  age: number | null;
   raceName: string;
   priceCents: number;
+  zoneLabel: string;
+};
+
+export type LiveRaceHub = {
+  key: string;
+  href: string;
+  name: string;
+  city: string | null;
+  date: string;
+  sport: string | null;
+  listings: LiveSlotCard[];
 };
 
 function ymd(value: Date) {
@@ -77,18 +103,55 @@ export function listingsForRace(cards: LiveSlotCard[], race: OfficialEvent) {
   return cards.filter((card) => raceForListing(card, [race]));
 }
 
-// Display only. Bid floor and step stay in lib/money.ts.
-function lowestOpenZoneCents(
-  zones: Array<{ status: string; current_cents?: number | null }>,
+export function customRaceKey(
+  name: string,
+  date: string,
+  city: string | null,
 ) {
-  const open = zones.filter((zone) => zone.status === "open");
-  if (open.length === 0) {
-    return FLOOR_CENTS;
-  }
-  return Math.min(
-    ...open.map((zone) => zone.current_cents ?? FLOOR_CENTS),
-  );
+  const day = date.slice(0, 10);
+  const base = normalizeEventSlug([name, city ?? ""].filter(Boolean).join(" "));
+  return `c-${base || "race"}-${day}`;
 }
+
+export function groupLiveRaces(
+  cards: LiveSlotCard[],
+  races: OfficialEvent[] = OFFICIAL_EVENTS,
+): LiveRaceHub[] {
+  const hubs = new Map<string, LiveRaceHub>();
+  for (const card of cards) {
+    const official = raceForListing(card, races);
+    const key = official
+      ? `o:${official.starts_on}`
+      : `c:${card.date.slice(0, 10)}:${card.raceName.trim().toLowerCase()}:${(card.city ?? "").trim().toLowerCase()}`;
+    const current = hubs.get(key);
+    if (current) {
+      current.listings.push(card);
+      continue;
+    }
+    const date = official?.starts_on ?? card.date;
+    const name = official?.name ?? card.raceName;
+    const city = official?.city ?? card.city;
+    hubs.set(key, {
+      key,
+      href: official
+        ? officialRacePath(official.starts_on)
+        : `/races/${customRaceKey(name, date, city)}`,
+      name,
+      city,
+      date,
+      sport: official?.sport ?? card.sport,
+      listings: [card],
+    });
+  }
+  return [...hubs.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function findLiveRaceHub(cards: LiveSlotCard[], id: string) {
+  const href = `/races/${id}`;
+  return groupLiveRaces(cards).find((hub) => hub.href === href) ?? null;
+}
+
+// Display only. Bid floor and step stay in lib/money.ts.
 
 async function loadLiveAthleteProfiles(supabase: Db, athleteIds: string[]) {
   const unique = [...new Set(athleteIds.filter(Boolean))];
@@ -96,25 +159,34 @@ async function loadLiveAthleteProfiles(supabase: Db, athleteIds: string[]) {
     return [] as ProfileRow[];
   }
 
-  const withPhoto = await supabase
-    .from("profiles")
-    .select("id, name, sport, sport_detail, photo_url")
-    .in("id", unique);
-  if (!withPhoto.error) {
-    return (withPhoto.data ?? []) as ProfileRow[];
+  const selects = [
+    "id, name, social, socials, sport, sport_detail, photo_url, age, dob",
+    "id, name, social, socials, sport, sport_detail, age, dob",
+    "id, name, social, socials, sport, sport_detail, photo_url",
+    "id, name, social, socials, sport, sport_detail",
+    "id, name, social, sport, sport_detail, photo_url, age, dob",
+    "id, name, social, sport, sport_detail, photo_url",
+    "id, name, social, sport, sport_detail",
+    "id, name, social",
+  ];
+  for (const columns of selects) {
+    const result = await supabase.from("profiles").select(columns).in("id", unique);
+    if (!result.error) {
+      return (result.data ?? []) as unknown as ProfileRow[];
+    }
   }
 
-  const withSport = await supabase
+  const named = await supabase
     .from("profiles")
-    .select("id, name, sport, sport_detail")
+    .select("id, name, social")
     .in("id", unique);
-  if (!withSport.error) {
-    return (withSport.data ?? []) as ProfileRow[];
-  }
-
-  const named = await supabase.from("profiles").select("id, name").in("id", unique);
   if (!named.error) {
     return (named.data ?? []) as ProfileRow[];
+  }
+
+  const ids = await supabase.from("profiles").select("id, name").in("id", unique);
+  if (!ids.error) {
+    return (ids.data ?? []) as ProfileRow[];
   }
 
   return [];
@@ -159,6 +231,10 @@ export async function loadLiveSlotCards(supabase: Db | null) {
     supabase,
     zoneRows.map((zone) => zone.id),
   );
+  const missingPhoto = live
+    .map((row) => row.athlete_id)
+    .filter((id) => !byId.get(id)?.photo_url?.trim());
+  const clips = await loadAthleteProfileClipUrls(missingPhoto);
 
   return live.map((row) => {
     const zones = (row.zones ?? []) as ZoneRow[];
@@ -168,6 +244,15 @@ export async function loadLiveSlotCards(supabase: Db | null) {
       row.sport?.trim() ??
       null;
     const race = raceForListing(row, OFFICIAL_EVENTS);
+    const slot = featuredSlot(
+      zones.map((zone) => ({
+        name: zone.name,
+        status: zone.status,
+        current_cents: leads.get(zone.id) ?? null,
+      })),
+    );
+    const athleteName = profile?.name?.trim() || "Athlete";
+    const photoUrl = profile?.photo_url?.trim() || null;
     return {
       id: row.id,
       name: row.name,
@@ -176,15 +261,18 @@ export async function loadLiveSlotCards(supabase: Db | null) {
       sport,
       slug: row.slug,
       athleteId: row.athlete_id,
-      athleteName: profile?.name?.trim() || "Athlete",
-      photoUrl: profile?.photo_url?.trim() || null,
+      athleteName,
+      handle: publicAthleteHandle({
+        social: profile?.social,
+        socials: profile?.socials,
+        name: athleteName,
+      }),
+      photoUrl,
+      clipUrl: photoUrl ? null : (clips.get(row.athlete_id) ?? null),
+      age: displayAge(profile),
       raceName: race?.name ?? row.name,
-      priceCents: lowestOpenZoneCents(
-        zones.map((zone) => ({
-          status: zone.status,
-          current_cents: leads.get(zone.id) ?? null,
-        })),
-      ),
+      priceCents: slot.current_cents ?? FLOOR_CENTS,
+      zoneLabel: slot.label,
     };
   });
 }

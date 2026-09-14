@@ -4,7 +4,7 @@ import {
   HERO_WIDTH,
 } from "@/lib/landing-media";
 
-// Same press as Join waitlist: lime plate, black square offset behind it.
+// Same press as List my race: lime plate, black square offset behind it.
 export default function HeroBody() {
   return (
     <div className="press-art mx-auto w-full max-w-[420px]">

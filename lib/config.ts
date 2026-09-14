@@ -13,9 +13,9 @@ export function parseRole(
 }
 
 export const SIGNIN_AGAIN_HREF = "/login?error=signin";
+export const SIGNED_OUT_HREF = "/login?signedout=1";
 
 const AUTH_GATE_SEGMENTS = new Set([
-  "onboarding",
   "new",
   "me",
   "settings",
@@ -30,25 +30,32 @@ export function isAuthGatePath(pathname: string) {
   return AUTH_GATE_SEGMENTS.has(segment);
 }
 
-export function loginPath(role?: Role | null, next?: string | null) {
+function authQuery(role?: Role | null, next?: string | null) {
   const params = new URLSearchParams();
   if (role) {
     params.set("role", role);
   }
   const returnTo = safeReturnPath(next ?? null);
-  if (returnTo) {
+  const pathOnly = returnTo.split("?")[0] ?? "";
+  if (returnTo && pathOnly !== "/onboarding") {
     params.set("next", returnTo);
   }
-  const query = params.toString();
+  return params.toString();
+}
+
+export function loginPath(role?: Role | null, next?: string | null) {
+  const query = authQuery(role, next);
   return query ? `/login?${query}` : "/login";
 }
 
-export function signupPath(role?: Role | null) {
-  return role ? `/signup?role=${role}` : "/signup";
+export function signupPath(role?: Role | null, next?: string | null) {
+  const query = authQuery(role, next);
+  return query ? `/signup?${query}` : "/signup";
 }
 
-export function onboardingPath(role?: Role | null) {
-  return role ? `/onboarding?role=${role}` : "/onboarding";
+export function onboardingPath(role?: Role | null, next?: string | null) {
+  const query = authQuery(role, next);
+  return query ? `/onboarding?${query}` : "/onboarding";
 }
 
 export const INTENDED_ROLE_KEY = "skinbid_intended_role";
@@ -64,14 +71,33 @@ export function pathForRole(role: string | null | undefined) {
   return "/onboarding";
 }
 
+export const PUBLIC_SITE_ORIGIN = "https://www.skinbid.me";
+
+export function canonicalSiteOrigin(raw?: string | null) {
+  const value = (raw ?? "").trim() || PUBLIC_SITE_ORIGIN;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") {
+      return `${url.protocol}//${url.host}`.replace(/\/$/, "");
+    }
+    if (host === "skinbid.me" || host === "www.skinbid.me") {
+      return PUBLIC_SITE_ORIGIN;
+    }
+    return `${url.protocol}//${url.host}`.replace(/\/$/, "");
+  } catch {
+    return PUBLIC_SITE_ORIGIN;
+  }
+}
+
 export const SITE = {
   name: "SkinBid",
-  title: "SkinBid — Event-day body slots",
+  title: "SkinBid — Your next race already has ad space",
   description:
-    "List logo slots on your body for any event. Brands pay SkinBid. You wear a temp tattoo for one day. You get paid after we check the photos.",
-  url: process.env.NEXT_PUBLIC_SITE_URL || "https://www.skinbid.me",
+    "List logo slots on your body. Brands pay SkinBid. You wear a temp tattoo for one day.",
+  url: canonicalSiteOrigin(process.env.NEXT_PUBLIC_SITE_URL),
   email: "skinbidme@gmail.com",
-  ogHeadline: "Sell the skin. Keep the medal.",
+  ogHeadline: "Your next race already has ad space.",
 };
 
 // How many waitlist posts one IP can send in the window.
@@ -120,6 +146,30 @@ export function brandOnboardingComplete(profile: {
     Boolean(profile.website?.trim()) &&
     isBrandCategory(profile.brand_category)
   );
+}
+
+// Athletes preview the body. They never see Bid / Advertise or pay a zone.
+// The event owner is locked even if the profile role is wrong.
+// Logged out can look, then must log in as a brand to bid.
+export function canAdvertiseOnEvent(input: {
+  role?: string | null;
+  isOwner?: boolean;
+  userId?: string | null;
+  athleteId?: string | null;
+}) {
+  if (input.isOwner) {
+    return false;
+  }
+  if (input.userId && input.athleteId && input.userId === input.athleteId) {
+    return false;
+  }
+  if (input.role === "athlete") {
+    return false;
+  }
+  if (input.role && input.role !== "brand") {
+    return false;
+  }
+  return true;
 }
 
 export const PAYOUT_RAIL = "PayPal" as const;
@@ -287,6 +337,17 @@ export function athleteIsAdult(profile: {
   return isAdultAge(profile?.age);
 }
 
+export function displayAge(profile: {
+  age?: number | null;
+  dob?: string | null;
+} | null | undefined) {
+  if (isAdultAge(profile?.age)) {
+    return profile.age;
+  }
+  const fromDob = ageFromDob(profile?.dob);
+  return isAdultAge(fromDob) ? fromDob : null;
+}
+
 export function dobInputBounds() {
   const max = new Date();
   max.setFullYear(max.getFullYear() - ATHLETE_AGE_MIN);
@@ -376,7 +437,7 @@ export function homeForCompleteProfile(profile: AuthProfile | null | undefined) 
   return onboardingPath();
 }
 
-// Incomplete → /onboarding?role=. Complete athlete → /me (or ?next=/new). Complete brand → /events.
+// Incomplete → /onboarding?role=&next=. Complete athlete → /me (or ?next=). Complete brand → next or /events.
 export function destinationAfterAuth(
   profile: AuthProfile | null | undefined,
   role?: Role | null,
@@ -384,7 +445,7 @@ export function destinationAfterAuth(
 ) {
   const mapped = pathAfterProfile(profile);
   if (mapped === "/onboarding") {
-    return onboardingPath(parseRole(profile?.role) ?? role);
+    return onboardingPath(parseRole(profile?.role) ?? role, next);
   }
   const returnTo = safeReturnPath(next ?? null);
   if (returnTo) {
@@ -409,7 +470,9 @@ export function sessionGateRedirect(
     if (pathname === "/onboarding") {
       return null;
     }
-    return onboardingPath(parseRole(profile?.role) ?? role);
+    const keep =
+      pathname.startsWith("/e/") || isAuthGatePath(pathname) ? pathname : null;
+    return onboardingPath(parseRole(profile?.role) ?? role, keep);
   }
   return null;
 }

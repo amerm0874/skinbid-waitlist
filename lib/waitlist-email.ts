@@ -23,9 +23,9 @@ function copyFor(role: Role, name: string, sport?: string) {
   if (role === "brand") {
     return {
       subject: "You’re on the SkinBid list",
-      preview: "We’ll email you when brands can buy race-day slots.",
+      preview: "We’ll email you when bidding opens.",
       heading: `You’re in, ${greeting}.`,
-      body: "We’ll email you when brands can buy race-day body slots.",
+      body: "Bidding is not open yet. We’ll email you when you can bid from $100.",
       steps: [
         "Pick an event",
         "Bid on a zone",
@@ -37,9 +37,9 @@ function copyFor(role: Role, name: string, sport?: string) {
 
   return {
     subject: "You’re on the SkinBid list",
-    preview: "We’ll email you when athletes can list race-day slots.",
-    heading: `You’re in, ${greeting}.`,
-    body: `${sportLine}We’ll email you when athletes can list race-day slots.`,
+      preview: "List a race. We’ll email you when brands can bid.",
+      heading: `You’re in, ${greeting}.`,
+      body: `${sportLine}You can list a race now. We’ll email you when brands start bidding.`,
     steps: [
       "List the event",
       "Brands bid on SkinBid",

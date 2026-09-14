@@ -29,7 +29,7 @@ export function createAdminSupabase() {
   });
 }
 
-// Public inserts (waitlist) should not use a logged-in cookie.
+// Public inserts should not use a logged-in cookie.
 export function createPublicSupabase() {
   const url = supabaseUrl();
   const key = supabaseAnonKey();

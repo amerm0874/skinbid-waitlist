@@ -1,25 +1,28 @@
-import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { isAuctionClosed } from "@/lib/auction";
 import { getSessionUser } from "@/lib/auth";
 import { categoryHoldsOtherZone } from "@/lib/category-lock";
-import { closeEventAuction, refundHeldOnZone } from "@/lib/close-auctions";
-import { notifyHeldBid } from "@/lib/email";
+import { closeEventAuction } from "@/lib/close-auctions";
 import {
   BID_STEP_CENTS,
-  FLOOR_CENTS,
   brandOnboardingComplete,
+  canAdvertiseOnEvent,
 } from "@/lib/config";
 import { DEMO_SLUG } from "@/lib/demo-event";
 import { athleteAvatarReady, isReadyAvatar } from "@/lib/event-create";
+import { logoDeskPath } from "@/lib/logo";
 import { isPublishedEventStatus } from "@/lib/types";
+import { holdPaidPendingBids } from "@/lib/hold-bid";
 import { nextBidCents } from "@/lib/money";
 import {
+  checkoutHost,
   createBidCheckout,
-  createPolarClient,
-  polarPaymentsEnabled,
-  resolveBidProductId,
-} from "@/lib/polar";
+  createWhopClient,
+  describeWhopError,
+  logWhopEnv,
+  resolveWhopCompanyId,
+  whopPaymentsEnabled,
+} from "@/lib/whop";
 import { takeToken } from "@/lib/rate-limit";
 import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { isPersistedZoneId, loadLastZoneBids } from "@/lib/zone-bids";
@@ -130,6 +133,18 @@ export async function POST(request: Request) {
   if (!event || event.status !== "live") {
     return NextResponse.json({ error: "Event is not live." }, { status: 400 });
   }
+  if (
+    !canAdvertiseOnEvent({
+      role: profile.role,
+      userId: user.id,
+      athleteId: event.athlete_id,
+    })
+  ) {
+    return NextResponse.json(
+      { error: "You cannot bid on your own event." },
+      { status: 403 },
+    );
+  }
   const glbReady = await athleteAvatarReady(supabase, event.athlete_id);
   if (!glbReady) {
     return NextResponse.json({ error: "Event is not live." }, { status: 400 });
@@ -158,6 +173,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Zone is closed." }, { status: 400 });
   }
 
+  await holdPaidPendingBids([zone.id]);
+
   const { data: held } = await admin
     .from("bids")
     .select("id, amount_cents, brand_id")
@@ -167,13 +184,12 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle();
 
-  const amount = nextBidCents(held?.amount_cents ?? null);
-  if (amount < FLOOR_CENTS || amount % BID_STEP_CENTS !== 0) {
-    return NextResponse.json({ error: "Floor is $100." }, { status: 400 });
-  }
-  if (Number.isFinite(body.amount_cents) && body.amount_cents !== amount) {
+  const minAsk = nextBidCents(held?.amount_cents ?? null);
+  const requested = Number(body.amount_cents);
+  const amount = Number.isFinite(requested) ? requested : minAsk;
+  if (amount < minAsk || amount % BID_STEP_CENTS !== 0) {
     return NextResponse.json(
-      { error: `Next bid is ${amount / 100} USD.` },
+      { error: `Next bid is ${minAsk / 100} USD.` },
       { status: 409 },
     );
   }
@@ -192,96 +208,35 @@ export async function POST(request: Request) {
     );
   }
 
-  if (polarPaymentsEnabled()) {
-    return startPolarCheckout({
-      request,
-      admin,
-      slug,
-      zoneId: zone.id,
-      zoneName: zone.name,
-      brandId: user.id,
-      amount,
-      customerEmail: user.email,
-      customerName: profile.name,
-    });
-  }
-
-  // Production must take payment. Local `next dev` can still insert held.
-  if (process.env.NODE_ENV === "production") {
+  logWhopEnv();
+  if (!whopPaymentsEnabled()) {
     return NextResponse.json(
       { error: "Payments are not ready." },
       { status: 503 },
     );
   }
 
-  // No Polar token: insert as held immediately. Page still bids.
-  const { data: bid, error: bidError } = await admin
-    .from("bids")
-    .insert({
-      zone_id: zone.id,
-      brand_id: user.id,
-      amount_cents: amount,
-      status: "held",
-    })
-    .select("id")
-    .single();
-  if (bidError || !bid) {
-    console.log("Bid insert failed", bidError?.message);
-    return NextResponse.json({ error: "Could not place the bid." }, { status: 500 });
-  }
-
-  const { data: heldNow } = await admin
-    .from("bids")
-    .select("id, amount_cents, created_at")
-    .eq("zone_id", zone.id)
-    .eq("status", "held")
-    .order("amount_cents", { ascending: false })
-    .order("created_at", { ascending: false });
-  const leader = heldNow?.[0];
-  if (!leader || leader.id !== bid.id) {
-    await admin.from("bids").update({ status: "refunded" }).eq("id", bid.id);
-    const min = nextBidCents(leader?.amount_cents ?? null);
-    return NextResponse.json(
-      { error: `Next bid is ${min / 100} USD.` },
-      { status: 409 },
-    );
-  }
-
-  await refundHeldOnZone(zone.id, bid.id, { refundPayment: false });
-  await notifyHeldBid({
-    bidId: bid.id,
-    athleteId: event.athlete_id,
-    currentBrandId: user.id,
+  return startWhopCheckout({
+    admin,
+    slug,
+    zoneId: zone.id,
     zoneName: zone.name,
-    amountCents: amount,
-    eventSlug: event.slug,
-    previousBid: held
-      ? { id: held.id, brandId: held.brand_id }
-      : null,
-  });
-  revalidatePath(`/e/${slug}`);
-  revalidatePath("/e/[slug]", "page");
-  console.log("Bid held", bid.id, zone.name, amount);
-  return NextResponse.json({
-    bid_id: bid.id,
-    amount_cents: amount,
-    status: "held",
+    brandId: user.id,
+    amount,
   });
 }
 
-async function startPolarCheckout(input: {
-  request: Request;
+async function startWhopCheckout(input: {
   admin: NonNullable<ReturnType<typeof createAdminSupabase>>;
   slug: string;
   zoneId: string;
   zoneName: string;
   brandId: string;
   amount: number;
-  customerEmail?: string | null;
-  customerName?: string | null;
 }) {
-  const polar = createPolarClient();
-  if (!polar) {
+  const whop = createWhopClient();
+  const companyId = resolveWhopCompanyId();
+  if (!whop || !companyId) {
     return NextResponse.json({ error: "Payments are not ready." }, { status: 503 });
   }
 
@@ -301,46 +256,46 @@ async function startPolarCheckout(input: {
   }
 
   try {
-    const productId = await resolveBidProductId(polar);
-    const forwarded = input.request.headers.get("x-forwarded-for");
     const checkout = await createBidCheckout({
-      polar,
-      productId,
+      whop,
+      companyId,
       amountCents: input.amount,
       bidId: bid.id,
       zoneId: input.zoneId,
       brandId: input.brandId,
       slug: input.slug,
-      customerEmail: input.customerEmail,
-      customerName: input.customerName,
-      customerIp:
-        forwarded?.split(",")[0]?.trim() ||
-        input.request.headers.get("x-real-ip")?.trim() ||
-        null,
     });
-    const { error: checkoutSaveError } = await input.admin
-      .from("bids")
-      .update({
-        polar_checkout_id: checkout.id,
-        dodo_checkout_id: checkout.id,
-      })
-      .eq("id", bid.id);
-    if (checkoutSaveError) {
-      console.log("Polar checkout id save", checkoutSaveError.message);
-      await input.admin
-        .from("bids")
-        .update({ dodo_checkout_id: checkout.id })
-        .eq("id", bid.id);
+    const checkoutUrl = checkout.purchase_url?.trim() || null;
+    if (!checkoutUrl) {
+      console.log("Whop checkout failed", bid.id, "no checkout URL");
+      await input.admin.from("bids").update({ status: "failed" }).eq("id", bid.id);
+      return NextResponse.json(
+        { error: "Checkout did not open. Try again." },
+        { status: 502 },
+      );
     }
-    console.log("Polar checkout", bid.id, input.zoneName, input.amount, checkout.id);
+    await input.admin
+      .from("bids")
+      .update({ whop_checkout_id: checkout.id })
+      .eq("id", bid.id);
+    console.log(
+      "Whop checkout",
+      bid.id,
+      input.zoneName,
+      input.amount,
+      checkout.id,
+      checkoutHost(checkoutUrl),
+    );
     return NextResponse.json({
       bid_id: bid.id,
       amount_cents: input.amount,
       status: "pending",
-      checkout_url: checkout.url,
+      checkout_url: checkoutUrl,
+      logo_path: logoDeskPath(input.slug, bid.id),
     });
   } catch (error) {
-    console.log("Polar checkout failed", error);
+    const detail = describeWhopError(error);
+    console.log("Whop checkout failed", detail.status, detail.message);
     await input.admin.from("bids").update({ status: "failed" }).eq("id", bid.id);
     return NextResponse.json(
       { error: "Checkout did not open. Try again." },

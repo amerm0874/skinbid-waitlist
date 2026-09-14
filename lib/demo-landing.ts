@@ -18,7 +18,7 @@ export type SlotId =
   | "thigh-back-left"
   | "thigh-back-right";
 
-// Names shown on the 3D card and the waitlist form.
+// Names shown on the 3D card.
 export const SLOT_LABELS: Record<SlotId, string> = {
   "chest-left": "Left chest",
   "chest-right": "Right chest",
@@ -88,7 +88,7 @@ export const DEMO_WATCHERS: DemoWatcher[] = [
   { country: "United States", code: "US", flag: "🇺🇸", agoSec: 93 },
 ];
 
-// Fake event pages for the waitlist 3D preview. Not real athletes. Not a live auction.
+// Fake event pages for the landing 3D preview. Not real athletes. Not a live auction.
 export const DEMO_ATHLETES: Record<Gender, DemoAthlete> = {
   male: {
     gender: "male",
@@ -226,7 +226,7 @@ export function openSlotCount(
   return slotIds.filter((id) => !athlete.bids[id]?.cents).length;
 }
 
-// Sum of demo bids on this body. Shown as "I'm paid $X".
+// Sum of demo bids on this body. Kept for HUD math if we show a preview total.
 export function paidCents(athlete: DemoAthlete) {
   return Object.values(athlete.bids).reduce(
     (sum, bid) => sum + (bid?.cents ?? 0),

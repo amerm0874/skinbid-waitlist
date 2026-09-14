@@ -4,13 +4,26 @@ import SiteShell from "@/components/landing/SiteShell";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "A brand puts their name on an athlete for one event. The athlete wears it that day. Then it comes off.",
+    "List a race. Brands bid on logo slots. You wear a temp tattoo for one day.",
 };
 
-const HOW_STEPS = [
-  "Name the event.",
-  "Wear the sponsor for one day.",
-  "Send the photos.",
+const STEPS = [
+  {
+    title: "List the event",
+    body: "Date, photo, slots. Any sport. You close slots you cannot sell.",
+  },
+  {
+    title: "Brand pays SkinBid",
+    body: "Money is held. Not sent to you yet. Auction only. Floor $100.",
+  },
+  {
+    title: "Wear it on the day",
+    body: "Temp tattoo in the bought slot. One day. Then it comes off.",
+  },
+  {
+    title: "Proof, then payout",
+    body: "Photos. We check. You get paid. Fail the proof, brand is refunded.",
+  },
 ];
 
 export default function AboutPage() {
@@ -18,47 +31,45 @@ export default function AboutPage() {
     <SiteShell>
       <main>
         <section className="site-wrap max-w-2xl py-[var(--block-y)]">
-          <h1 className="display text-[40px] md:text-[56px]">The idea</h1>
-          <div className="mt-4 space-y-2 text-[15px] leading-6 text-muted">
-            <p>A race already has cameras, a crowd, and a body people watch.</p>
-            <p>SkinBid turns that day into sponsorship.</p>
-            <p>
-              A brand puts their name on an athlete for one event. The athlete
-              wears it that day. Then it comes off.
-            </p>
-          </div>
-        </section>
-
-        <section className="site-wrap max-w-2xl py-[var(--block-y)]">
-          <h2 className="display text-[36px] md:text-[52px]">The goal</h2>
-          <div className="mt-4 space-y-2 text-[15px] leading-6 text-muted">
-            <p>Athletes get a sponsor for work they already do.</p>
-            <p>Brands get seen at a real start line, not in another feed post.</p>
-          </div>
-          <p className="mt-4 text-[16px] leading-6 text-ink">
-            That is the whole product.
+          <h1 className="display text-[40px] md:text-[56px]">
+            Your next race already has ad space.
+          </h1>
+          <p className="mt-4 max-w-md text-[15px] leading-6 text-muted">
+            List logo slots on your body. Brands pay SkinBid. You wear a temp
+            tattoo for one day.
           </p>
         </section>
 
         <section className="site-wrap max-w-2xl py-[var(--block-y)]">
-          <h2 className="display text-[36px] md:text-[52px]">How</h2>
-          <ol className="mt-4 space-y-2 text-[15px] leading-6 text-muted">
-            {HOW_STEPS.map((step, index) => (
-              <li key={step}>
-                <span className="mr-3 text-ink/40">{index + 1}</span>
-                {step}
+          <h2 className="display text-[36px] md:text-[52px]">
+            Four steps. No pitch deck.
+          </h2>
+          <ol className="mt-10 grid gap-6">
+            {STEPS.map((step, index) => (
+              <li key={step.title}>
+                <p className="font-mono text-[12px] text-accent">
+                  {String(index + 1).padStart(2, "0")}
+                </p>
+                <h3 className="mt-2 text-[18px] font-semibold">{step.title}</h3>
+                <p className="mt-2 text-[14px] leading-5 text-muted">
+                  {step.body}
+                </p>
               </li>
             ))}
           </ol>
         </section>
 
-        <section
-          id="waitlist-bottom"
-          className="site-wrap max-w-2xl pb-[var(--block-y)]"
-        >
-          <a href="/waitlist" className="btn btn-solid">
-            Get early access
-          </a>
+        <section className="site-wrap max-w-2xl pb-[var(--block-y)]">
+          <div className="flex flex-wrap gap-3">
+            <a href="/signup?role=athlete" className="press-btn">
+              <span className="press-btn-plate" aria-hidden="true" />
+              <span className="press-btn-face">List my race</span>
+            </a>
+            <a href="/signup?role=brand" className="press-btn">
+              <span className="press-btn-plate" aria-hidden="true" />
+              <span className="press-btn-face">Advertise my brand</span>
+            </a>
+          </div>
         </section>
       </main>
     </SiteShell>

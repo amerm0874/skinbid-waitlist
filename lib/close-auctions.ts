@@ -1,7 +1,12 @@
 import { revalidatePath } from "next/cache";
 import { AUCTION_CLOSE_HOURS } from "@/lib/config";
-import { notifyAuctionClosed } from "@/lib/email";
-import { polarPaymentsEnabled, refundPolarOrder } from "@/lib/polar";
+import { isMissingColumn } from "@/lib/db-error";
+import {
+  notifyAuctionWon,
+  notifyRefundDone,
+  sendProofDueReminders,
+} from "@/lib/email";
+import { refundWhopPayment, whopPaymentsEnabled } from "@/lib/whop";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 
 type Admin = NonNullable<ReturnType<typeof createAdminSupabase>>;
@@ -38,13 +43,16 @@ export async function closeDueAuctions(now = new Date()) {
     }
   }
 
+  const proofDue = await sendProofDueReminders(now);
+
   console.log("Auction close job", {
     closed: dueEvents?.length ?? 0,
     won,
     failed,
+    proofDue: proofDue.sent,
   });
 
-  return { closed: dueEvents?.length ?? 0, won, failed };
+  return { closed: dueEvents?.length ?? 0, won, failed, proofDue: proofDue.sent };
 }
 
 // Used by /e/[slug] so close does not wait on cron.
@@ -89,29 +97,20 @@ async function settleEvent(admin: Admin, eventId: string) {
     won += 1;
 
     if (event) {
-      // T–48h athlete mail ("auction closed, print the mark") goes out here.
-      // Event-morning mail is sendEventMorningReminders in lib/email.ts — cron later.
-      await notifyAuctionClosed({
+      await notifyAuctionWon({
         bidId: leader.id,
         athleteId: event.athlete_id,
         brandId: leader.brand_id,
         zoneName: zone.name,
         amountCents: leader.amount_cents,
         eventSlug: event.slug,
-        eventName: event.name,
       });
     }
 
     if (losers.length) {
-      await admin
-        .from("bids")
-        .update({ status: "failed" })
-        .in(
-          "id",
-          losers.map((row) => row.id),
-        );
       failed += losers.length;
     }
+    await refundHeldOnZone(zone.id, leader.id);
   }
 
   await admin.from("events").update({ status: "closed" }).eq("id", eventId);
@@ -129,48 +128,64 @@ export async function refundHeldOnZone(
     return;
   }
 
-  const refundPayment = options?.refundPayment !== false && polarPaymentsEnabled();
-  type HeldRow = {
-    id: string;
-    amount_cents: number;
-    polar_order_id?: string | null;
-    dodo_payment_id?: string | null;
-  };
-  let held: HeldRow[] | null = null;
-  const withPolar = await admin
+  const refundPayment = options?.refundPayment !== false && whopPaymentsEnabled();
+  const { data: zone } = await admin
+    .from("zones")
+    .select("id, name, event_id")
+    .eq("id", zoneId)
+    .maybeSingle();
+  const { data: event } = zone
+    ? await admin.from("events").select("slug").eq("id", zone.event_id).maybeSingle()
+    : { data: null };
+  const { data: held } = await admin
     .from("bids")
-    .select("id, amount_cents, polar_order_id, dodo_payment_id")
+    .select("id, brand_id, amount_cents, whop_payment_id")
     .eq("zone_id", zoneId)
     .eq("status", "held");
-  if (withPolar.error) {
-    const fallback = await admin
-      .from("bids")
-      .select("id, amount_cents, dodo_payment_id")
-      .eq("zone_id", zoneId)
-      .eq("status", "held");
-    held = fallback.data;
-  } else {
-    held = withPolar.data;
-  }
 
   for (const bid of held ?? []) {
     if (exceptBidId && bid.id === exceptBidId) {
       continue;
     }
-    const orderId =
-      ("polar_order_id" in bid && typeof bid.polar_order_id === "string"
-        ? bid.polar_order_id
-        : null) || bid.dodo_payment_id;
-    if (refundPayment && orderId) {
+    if (refundPayment && bid.whop_payment_id) {
       try {
-        await refundPolarOrder(orderId, bid.amount_cents);
+        await refundWhopPayment(bid.whop_payment_id);
       } catch (error) {
-        console.log("Polar outbid refund failed", bid.id, error);
+        console.log("Whop outbid refund failed", bid.id, error);
       }
     }
-    await admin
-      .from("bids")
-      .update({ status: "refunded", payable: false })
-      .eq("id", bid.id);
+    await refundHeldBid(admin, bid.id);
+    if (event?.slug && zone) {
+      await notifyRefundDone({
+        bidId: bid.id,
+        brandId: bid.brand_id,
+        zoneName: zone.name,
+        amountCents: bid.amount_cents,
+        eventSlug: event.slug,
+      });
+    }
+  }
+}
+
+async function refundHeldBid(admin: Admin, bidId: string) {
+  let payload: Record<string, unknown> = {
+    status: "refunded",
+    payable: false,
+    logo_url: null,
+    mark_kind: null,
+    post_rules: null,
+  };
+  let { error } = await admin.from("bids").update(payload).eq("id", bidId);
+  for (const column of ["post_rules", "mark_kind", "logo_url"] as const) {
+    if (!error || !isMissingColumn(error, column)) {
+      continue;
+    }
+    const { [column]: _omit, ...rest } = payload;
+    void _omit;
+    payload = rest;
+    ({ error } = await admin.from("bids").update(payload).eq("id", bidId));
+  }
+  if (error) {
+    console.log("Outbid refund failed", bidId, error.message);
   }
 }

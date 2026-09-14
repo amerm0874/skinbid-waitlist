@@ -1,4 +1,3 @@
-// Waitlist landing stays on `/` and `/waitlist`.
 // Set WAITLIST_ONLY=true to hide product URLs. Unset or false unlocks them.
 
 const HIDDEN_PAGES = new Set([
@@ -18,7 +17,7 @@ const HIDDEN_PAGES = new Set([
   "inbox",
 ]);
 
-const HIDDEN_APIS = new Set(["bids", "events", "admin", "outreach"]);
+const HIDDEN_APIS = new Set(["bids", "events", "admin", "outreach", "notifications"]);
 
 function firstSegment(pathname: string, index: number) {
   return pathname.split("/").filter(Boolean)[index] ?? "";
@@ -39,7 +38,7 @@ export function isHiddenWaitlistApi(pathname: string) {
   return HIDDEN_APIS.has(firstSegment(pathname, 1));
 }
 
-// Only allow same-site paths like /waitlist — never https://evil.com
+// Only allow same-site paths like /events — never https://evil.com
 export function safeNextPath(raw: string | null, fallback = "/") {
   if (!raw) {
     return fallback;
@@ -59,7 +58,9 @@ const BLOCKED_RETURN_PATHS = new Set([
   "/",
   "/login",
   "/signup",
+  "/waitlist",
   "/auth/callback",
+  "/auth/signout",
 ]);
 
 // Post-auth return. Never send people to `/` or back through login.

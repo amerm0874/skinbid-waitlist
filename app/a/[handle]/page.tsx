@@ -1,7 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { AdvertiseBrandButton } from "@/components/product/AdvertiseBrandButton";
+import { AuctionClock } from "@/components/product/AuctionClock";
+import { EmptyState } from "@/components/product/EmptyState";
+import { ProductShell } from "@/components/product/ProductShell";
+import { ProfileClip } from "@/components/product/ProfileClip";
+import { SocialNetworkIcon } from "@/components/product/SocialNetworkIcon";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { getSessionUser } from "@/lib/auth";
+import { loadAthleteProfileClipUrl } from "@/lib/capture-state";
 import { athleteSportLabel } from "@/lib/config";
+import { formatRaceDay, raceClockDate } from "@/lib/official-events";
 import { loadAthleteByHandle } from "@/lib/public-listings";
 import {
   athletePageDescription,
@@ -10,24 +19,18 @@ import {
   NO_OG_METADATA,
   shareMetadata,
 } from "@/lib/seo";
-import { publicSocialLinks } from "@/lib/socials";
-import { AthleteBody } from "@/components/product/AthleteBody";
-import { EmptyState } from "@/components/product/EmptyState";
-import { ProductShell } from "@/components/product/ProductShell";
-import { RaceCard } from "@/components/product/RaceCard";
-import { SocialNetworkIcon } from "@/components/product/SocialNetworkIcon";
-import { JsonLd } from "@/components/seo/JsonLd";
+import { publicShareSocials } from "@/lib/socials";
 
 type PageProps = {
   params: Promise<{ handle: string }>;
 };
 
-export const dynamic = "force-dynamic";
-
 function nameInitial(name: string) {
   const letter = name.trim().slice(0, 1);
   return letter ? letter.toUpperCase() : "A";
 }
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { handle } = await params;
@@ -38,10 +41,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       title: { absolute: "Not found | SkinBid" },
     };
   }
-  const title = athletePageTitle(athlete.name);
+  const eventName = athlete.liveEvent?.name ?? athlete.race?.name ?? null;
+  const title = athletePageTitle(athlete.name, eventName);
   const description = athletePageDescription({
     name: athlete.name,
-    eventName: athlete.liveEvent?.name ?? athlete.race?.name ?? null,
+    eventName,
     dateIso: athlete.liveEvent?.date ?? athlete.race?.starts_on ?? null,
   });
   return shareMetadata(title, description, `/a/${athlete.handle}`);
@@ -55,13 +59,24 @@ export default async function AthletePage({ params }: PageProps) {
   }
 
   const { user, profile } = await getSessionUser();
-  const socials = publicSocialLinks(athlete.socials, athlete.social);
+  const socials = publicShareSocials(athlete.socials, athlete.social);
   const sport =
     athleteSportLabel(athlete.sport, athlete.sportDetail) ??
     athlete.sport?.trim() ??
-    "—";
+    null;
   const live = athlete.liveEvent;
-  const hasCage = Boolean(athlete.glbUrl);
+  const nextRace = live ?? (athlete.race
+    ? {
+        name: athlete.race.name,
+        date: athlete.race.starts_on,
+        city: athlete.race.city,
+        slug: null as string | null,
+      }
+    : null);
+  const profileClipUrl = await loadAthleteProfileClipUrl(athlete.id);
+  const bits = [athlete.age, sport, live?.city ?? athlete.race?.city, athlete.country]
+    .filter((value) => value != null && String(value).trim())
+    .map(String);
 
   return (
     <ProductShell email={user?.email} role={profile?.role}>
@@ -84,55 +99,70 @@ export default async function AthletePage({ params }: PageProps) {
       />
 
       <div className="athlete-page">
-        {hasCage ? <AthleteBody glbUrl={athlete.glbUrl!} /> : null}
-
-        <div className={hasCage ? "athlete-bib athlete-bib-compact" : "athlete-bib"}>
-          {athlete.photoUrl ? (
-            <img
-              key={athlete.photoUrl}
-              src={athlete.photoUrl}
-              alt=""
-              className="athlete-photo"
-            />
-          ) : (
-            <span className="athlete-photo athlete-photo-initial" aria-hidden="true">
+        {profileClipUrl ? (
+          <div className="athlete-face has-photo">
+            <ProfileClip src={profileClipUrl} />
+          </div>
+        ) : athlete.photoUrl ? (
+          <div className="athlete-face has-photo">
+            <img src={athlete.photoUrl} alt="" className="athlete-face-photo" />
+          </div>
+        ) : (
+          <div className="athlete-face">
+            <span className="athlete-face-initial" aria-hidden="true">
               {nameInitial(athlete.name)}
             </span>
-          )}
-          <div className="athlete-bib-copy">
-            <h1 className="athlete-bib-name">{athlete.name}</h1>
-            <p className="athlete-bib-meta">
-              {athlete.country?.trim() || "—"} · {sport}
-            </p>
-            {socials.length > 0 ? (
-              <ul className="athlete-socials">
-                {socials.map((row) => (
-                  <li key={`${row.network}-${row.href}`}>
-                    <a
-                      href={row.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="athlete-social"
-                    >
-                      <SocialNetworkIcon network={row.network} />
-                      <span>{row.label}</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </div>
-        </div>
-
-        {athlete.race ? (
-          <ul className="event-card-grid athlete-race">
-            <li>
-              <RaceCard race={athlete.race} href={athlete.race.href} eager />
-            </li>
-          </ul>
-        ) : (
-          <EmptyState line="No live race." />
         )}
+
+        <header className="athlete-meet">
+          <h1 className="athlete-meet-name">{athlete.name}</h1>
+          {bits.length > 0 ? (
+            <p className="athlete-meet-meta">{bits.join(" · ")}</p>
+          ) : null}
+        </header>
+
+        {nextRace ? (
+          <section className="athlete-next">
+            <p className="athlete-next-name">{nextRace.name}</p>
+            <p className="athlete-next-meta">
+              {[nextRace.city, formatRaceDay(nextRace.date)]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            <AuctionClock eventDate={raceClockDate(nextRace.date)} />
+          </section>
+        ) : null}
+
+        {live && live.openZones.length > 0 ? (
+          <ul className="athlete-zones">
+            {live.openZones.map((zone) => (
+              <li key={zone}>{zone}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        {live ? <AdvertiseBrandButton slug={live.slug} full /> : null}
+
+        {socials.length > 0 ? (
+          <ul className="athlete-socials">
+            {socials.map((row) => (
+              <li key={`${row.network}-${row.href}`}>
+                <a
+                  href={row.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="athlete-social"
+                  aria-label={row.network}
+                >
+                  <SocialNetworkIcon network={row.network} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {live ? null : <EmptyState line="No live event." />}
       </div>
     </ProductShell>
   );

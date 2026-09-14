@@ -3,17 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { auctionClosesAt, isAuctionOpen } from "@/lib/auction";
+import { formatEventStartLabel, isAuctionOpen } from "@/lib/auction";
 import { logoDownloadName } from "@/lib/athlete-status";
-import { FLOOR_CENTS } from "@/lib/config";
-import { logoClientError } from "@/lib/logo";
+import { canAdvertiseOnEvent, BID_STEP_CENTS, FLOOR_CENTS } from "@/lib/config";
+import { DEMO_SLUG } from "@/lib/demo-event";
+import { athleteProfilePath } from "@/lib/handle";
+import { logoDeskPath } from "@/lib/logo";
 import { centsToUsd, nextBidCents } from "@/lib/money";
 import type { BidStatus } from "@/lib/types";
 import { isPersistedZoneId, type ZoneBidItem } from "@/lib/zone-bids";
 import { featuredSlot, ZONE_LABEL, ZONE_NAMES, type ZoneName } from "@/lib/zones";
-import { BidGate } from "@/components/product/BidGate";
+import { captureEvent, captureException } from "@/lib/analytics";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
+import PhotoStage from "@/components/product/PhotoStage";
+import { AuctionClock } from "@/components/product/AuctionClock";
 import { CopyLinkButton } from "@/components/product/CopyLinkButton";
 import { DownloadLogo } from "@/components/product/DownloadLogo";
+import { BidGate } from "@/components/product/BidGate";
+import { EventLink } from "@/components/product/EventLink";
 import { EventZoneOwnerAction } from "@/components/product/ZoneStatusControls";
 
 const EventCage = dynamic(() => import("@/components/cage/EventCage"), {
@@ -37,14 +44,17 @@ type Props = {
   slug: string;
   eventId?: string;
   athleteName: string;
+  athleteHandle?: string | null;
   eventName: string;
   eventDate: string;
   glbUrl: string;
+  frontPhotoUrl?: string | null;
+  backPhotoUrl?: string | null;
   zones: StageZone[];
   canBid: boolean;
   role?: "athlete" | "brand" | null;
   acceptsBids?: boolean;
-  paymentsReady?: boolean;
+  canAdvertise?: boolean;
   isOwner?: boolean;
   loginHref: string;
   brandName?: string | null;
@@ -57,14 +67,17 @@ export default function EventStage({
   slug,
   eventId,
   athleteName,
+  athleteHandle,
   eventName,
   eventDate,
   glbUrl,
+  frontPhotoUrl = null,
+  backPhotoUrl = null,
   zones,
   canBid,
   role,
   acceptsBids = true,
-  paymentsReady = false,
+  canAdvertise,
   isOwner,
   loginHref,
   brandName,
@@ -79,10 +92,16 @@ export default function EventStage({
     pickDefaultZone(zones, currentBrandId),
   );
   const [busy, setBusy] = useState(false);
+  const biddingRef = useRef(false);
   const [zoneBusy, setZoneBusy] = useState(false);
-  const [logoBusy, setLogoBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [now, setNow] = useState<number | null>(null);
+  const [askCents, setAskCents] = useState(FLOOR_CENTS);
+  const [lookNonce, setLookNonce] = useState(0);
+
+  useEffect(() => {
+    captureEvent("event_opened", { slug });
+  }, [slug]);
 
   useEffect(() => {
     setLiveZones(zones);
@@ -93,13 +112,14 @@ export default function EventStage({
   }, [zoneBids]);
 
   useEffect(() => {
-    const paid = new URLSearchParams(window.location.search).get("checkout_id");
+    const paid = new URLSearchParams(window.location.search).get("bid_id");
     if (!paid) {
       return;
     }
-    setMessage("Payment received. Lead updates when Polar confirms.");
-    router.refresh();
-  }, [router]);
+    captureEvent("checkout_returned", { slug, bid_id: paid, kind: "bid" });
+    captureEvent("bid_paid_returned", { slug, bid_id: paid });
+    window.location.replace(logoDeskPath(slug, paid));
+  }, [slug]);
 
   useEffect(() => {
     const start = window.setTimeout(() => setNow(Date.now()), 0);
@@ -113,9 +133,13 @@ export default function EventStage({
   const clock = now == null ? Date.now() : now;
   const zone = liveZones.find((item) => item.name === selected) ?? null;
   const open = isAuctionOpen(eventDate, new Date(clock));
-  const closeAt = auctionClosesAt(eventDate);
-  const amount = nextBidCents(zone?.current_cents ?? null);
+  const minAsk = nextBidCents(zone?.current_cents ?? null);
+  const amount = Math.max(askCents, minAsk);
   const wasOpen = useRef(isAuctionOpen(eventDate));
+
+  useEffect(() => {
+    setAskCents(minAsk);
+  }, [zone?.id, minAsk]);
 
   useEffect(() => {
     if (wasOpen.current && !open) {
@@ -150,17 +174,25 @@ export default function EventStage({
     };
   }, [acceptsBids, slug, zone?.id]);
 
+  const brandCanAdvertise =
+    canAdvertise ?? canAdvertiseOnEvent({ role, isOwner });
+
+  function pickZone(name: ZoneName) {
+    captureEvent("zone_clicked", { zone: name, slug });
+    setSelected(name);
+    setLookNonce((n) => n + 1);
+  }
+
   async function bid() {
-    if (!acceptsBids) {
-      setMessage("This preview does not take bids.");
+    if (busy || biddingRef.current) {
       return;
     }
-    if (!canBid) {
-      if (role === "athlete") {
-        setMessage("Only brands bid.");
-        return;
-      }
-      window.location.href = loginHref;
+    if (!brandCanAdvertise) {
+      setMessage("Only brands bid.");
+      return;
+    }
+    if (!acceptsBids) {
+      setMessage("Demo — bidding is not open.");
       return;
     }
     if (!zone) {
@@ -175,6 +207,16 @@ export default function EventStage({
       setMessage("Auction is closed.");
       return;
     }
+    captureEvent("bid_clicked", {
+      slug,
+      zone: zone.name,
+      amount_cents: amount,
+    });
+    if (!canBid) {
+      window.location.href = loginHref;
+      return;
+    }
+    biddingRef.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -194,147 +236,61 @@ export default function EventStage({
         status?: string;
         amount_cents?: number;
         checkout_url?: string;
+        logo_path?: string;
       };
       if (!response.ok) {
         setMessage(payload.error || "Bid did not land.");
+        biddingRef.current = false;
+        setBusy(false);
         return;
       }
-      if (payload.checkout_url) {
-        window.location.href = payload.checkout_url;
+      if (!payload.checkout_url) {
+        setMessage("Payments are not ready.");
+        biddingRef.current = false;
+        setBusy(false);
         return;
       }
-      console.log("Bid held", zone.name, payload.amount_cents);
-      const nextBid: ZoneBidItem = {
-        id: payload.bid_id ?? `local-${Date.now()}`,
-        brandName: brandName || "You",
-        amountCents: payload.amount_cents ?? amount,
-        createdAt: new Date().toISOString(),
-        status: isBidStatus(payload.status) ? payload.status : "held",
-      };
-      setLiveZones((current) =>
-        current.map((item) =>
-          item.id === zone.id
-            ? {
-                ...item,
-                occupied: true,
-                current_cents: payload.amount_cents ?? amount,
-                brandId: currentBrandId ?? item.brandId,
-                brandLabel: brandName || item.brandLabel || "You",
-                logoUrl: item.logoUrl || brandLogoUrl || null,
-              }
-            : item,
-        ),
-      );
-      setLiveBids((current) => ({
-        ...current,
-        [zone.id]: [
-          nextBid,
-          ...(current[zone.id] ?? []).filter((row) => row.id !== nextBid.id),
-        ].slice(0, 10),
-      }));
-      setMessage("You're the lead.");
-      router.refresh();
+      captureEvent("checkout_opened", {
+        slug,
+        zone: zone.name,
+        kind: "bid",
+      });
+      window.location.href = payload.checkout_url;
     } catch (error) {
       console.log("Bid failed", error);
+      captureException(error);
       setMessage("Bid did not land.");
-    } finally {
+      biddingRef.current = false;
       setBusy(false);
     }
   }
 
-  async function uploadLogo(file: File) {
-    if (!zone) {
-      setMessage("Tap a zone.");
-      return;
-    }
-    if (!isPersistedZoneId(zone.id)) {
-      setMessage("This preview does not take logos.");
-      return;
-    }
-    const invalid = logoClientError(file);
-    if (invalid) {
-      setMessage(invalid);
-      return;
-    }
-    setLogoBusy(true);
-    setMessage("");
-    try {
-      const body = new FormData();
-      body.set("zone_id", zone.id);
-      body.set("file", file);
-      const response = await fetch("/api/bids/logo", {
-        method: "POST",
-        body,
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        logo_url?: string;
-      };
-      if (!response.ok || !payload.logo_url) {
-        setMessage(payload.error || "Logo did not save.");
-        return;
-      }
-      console.log("Logo saved", zone.name);
-      setLiveZones((current) =>
-        current.map((item) =>
-          item.id === zone.id
-            ? {
-                ...item,
-                occupied: true,
-                brandId: currentBrandId ?? item.brandId,
-                brandLabel: brandName || item.brandLabel || "You",
-                logoUrl: payload.logo_url ?? item.logoUrl,
-              }
-            : item,
-        ),
-      );
-      setMessage("Logo is on the zone.");
-      router.refresh();
-    } catch (error) {
-      console.log("Logo upload failed", error);
-      setMessage("Logo did not save.");
-    } finally {
-      setLogoBusy(false);
-    }
-  }
-
-  const canUploadLogo = Boolean(
-    currentBrandId &&
-      zone?.occupied &&
-      zone.brandId === currentBrandId &&
-      isPersistedZoneId(zone.id),
+  const isDemo = slug === DEMO_SLUG;
+  const wonThisZone = Boolean(
+    currentBrandId && zone?.occupied && zone.brandId === currentBrandId,
   );
+  const showLogoDesk = brandCanAdvertise && !isDemo && wonThisZone;
+  const showAdvertise =
+    brandCanAdvertise && acceptsBids && zone?.status === "open" && open;
 
-  const when = new Date(eventDate).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const when = formatEventStartLabel(eventDate);
+  const profileHref = athleteProfilePath(athleteHandle);
 
   const zoneRows = ZONE_NAMES.map((name) => {
     const row = liveZones.find((item) => item.name === name);
-    const closed = row?.status === "closed";
-    const lead = row?.occupied ? row.brandLabel : null;
-    const price = row?.current_cents
-      ? centsToUsd(row.current_cents)
-      : closed
-        ? "closed"
-        : centsToUsd(FLOOR_CENTS);
+    const copy = zoneRowCopy(row, open);
+    const athleteClosed = row?.status === "closed";
     return (
       <button
         key={name}
         type="button"
         aria-pressed={selected === name}
-        className={`zone-row${selected === name ? " is-on" : ""}${closed ? " is-closed" : ""}${!row?.current_cents && !closed ? " is-floor" : ""}`}
-        onClick={() => setSelected(name)}
+        className={`zone-row${selected === name ? " is-on" : ""}${athleteClosed ? " is-closed" : ""}${copy.floor ? " is-floor" : ""}`}
+        onClick={() => pickZone(name)}
       >
-        <span className="zone-row-price">{price}</span>
-        <span className="zone-row-name">{ZONE_LABEL[name]}</span>
-        <span className="zone-row-lead">
-          {lead ?? (closed ? "closed" : "open")}
-        </span>
+        <span className="zone-row-name">{copy.name}</span>
+        <span className="zone-row-lead">{copy.lead}</span>
+        <span className="zone-row-price">{copy.price}</span>
       </button>
     );
   });
@@ -362,40 +318,55 @@ export default function EventStage({
           <>Open</>
         )}
       </p>
-      {!isOwner ? <BidGate slug={slug} /> : null}
-      {canUploadLogo ? (
-        <label className="event-logo-upload">
-          <span className="field-label">
-            {zone?.logoUrl ? "Replace zone logo" : "Upload zone logo"}
+      {open && zone?.status === "closed" && brandCanAdvertise ? (
+        <p className="fine">Closed. No bid.</p>
+      ) : null}
+      {open && isDemo && brandCanAdvertise ? <BidGate /> : null}
+      {showAdvertise && zone?.occupied ? (
+        <div className="bid-stepper">
+          <button
+            type="button"
+            className="bid-stepper-btn"
+            aria-label="Lower bid"
+            disabled={busy || amount <= minAsk}
+            onClick={() => setAskCents(amount - BID_STEP_CENTS)}
+          >
+            −
+          </button>
+          <span className="bid-stepper-amt">{centsToUsd(amount)}</span>
+          <button
+            type="button"
+            className="bid-stepper-btn"
+            aria-label="Raise bid"
+            disabled={busy}
+            onClick={() => setAskCents(amount + BID_STEP_CENTS)}
+          >
+            +
+          </button>
+        </div>
+      ) : null}
+      {showAdvertise ? (
+        <button
+          type="button"
+          className="cta-press cta-press-full"
+          data-attr="Advertise"
+          disabled={busy}
+          onClick={() => void bid()}
+        >
+          <span className="cta-press-plate" aria-hidden="true" />
+          <span className="cta-press-face">
+            {busy ? "Opening Whop…" : `Advertise ${centsToUsd(amount)}`}
           </span>
-          {zone?.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={zone.logoUrl}
-              alt=""
-              className="event-logo-preview"
-            />
-          ) : null}
-          <input
-            className="field"
-            type="file"
-            name="logo"
-            accept="image/png"
-            disabled={logoBusy}
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null;
-              event.target.value = "";
-              if (file) {
-                void uploadLogo(file);
-              }
-            }}
-          />
-          <span className="fine">
-            {logoBusy
-              ? "Saving logo…"
-              : "Transparent PNG, max 2 MB. It sits on this zone."}
-          </span>
-        </label>
+        </button>
+      ) : null}
+      {showLogoDesk ? (
+        <a
+          href={logoDeskPath(slug)}
+          className="event-logo-desk-link"
+          onClick={() => captureEvent("logo_desk_opened", { slug })}
+        >
+          {zone?.logoUrl ? "Replace logo" : "Upload logo"}
+        </a>
       ) : null}
       {message ? (
         <p
@@ -453,39 +424,55 @@ export default function EventStage({
       {isOwner && zone ? <BidLog bids={liveBids[zone.id] ?? []} /> : null}
       {isOwner ? (
         <p className="fine bid-rules">
-          Floor $100, then +$100. You pay SkinBid later. Highest bid 48 hours
-          before the event wins. Same category cannot take a second zone.
+          Floor $100, then +$100. Highest bid 48 hours before the event wins.
+          Same category cannot take a second zone.
+        </p>
+      ) : showAdvertise ? (
+        <p className="fine bid-rules">
+          Floor $100, then +$100. Highest bid 48 hours before the event wins.
         </p>
       ) : null}
     </>
   );
 
-  const askCents =
-    zone?.current_cents ?? (zone?.status === "closed" ? null : FLOOR_CENTS);
-  const askPrice = askCents != null ? centsToUsd(askCents) : "closed";
-  const askName = zone ? ZONE_LABEL[zone.name] : "Zone";
-  const askLead =
-    zone?.occupied && zone.brandLabel
-      ? zone.brandLabel
-      : zone?.status === "closed"
-        ? "closed"
-        : "open";
+  const showDock =
+    Boolean(message) ||
+    showAdvertise ||
+    showLogoDesk ||
+    (isDemo && brandCanAdvertise) ||
+    Boolean(isOwner);
 
   return (
     <div className="event-stage">
       <div className="event-cage-wrap">
-        <EventCage
-          glbUrl={glbUrl}
-          zones={liveZones}
-          selected={selected}
-          onSelect={setSelected}
-        />
+        {SHOW_3D_BODY ? (
+          <EventCage
+            glbUrl={glbUrl}
+            zones={liveZones}
+            selected={selected}
+            onSelect={pickZone}
+            lookNonce={lookNonce}
+          />
+        ) : (
+          <PhotoStage
+            frontUrl={frontPhotoUrl}
+            backUrl={backPhotoUrl}
+            zones={liveZones}
+            selected={selected}
+            onSelect={pickZone}
+            athleteName={athleteName}
+            frameNonce={lookNonce}
+          />
+        )}
         <div className="event-hud">
           <div className="event-hud-ask">
-            <p className="event-hud-zone">{askName}</p>
-            <p className="event-hud-price">{askPrice}</p>
-            <p className="event-hud-lead">{askLead}</p>
-            <h1 className="event-hud-meet display">{athleteName}</h1>
+            <h1 className="event-hud-meet display">
+              {profileHref ? (
+                <EventLink href={profileHref}>{athleteName}</EventLink>
+              ) : (
+                athleteName
+              )}
+            </h1>
             <p className="event-hud-meet-sub">
               {eventName} · {when}
             </p>
@@ -496,20 +483,56 @@ export default function EventStage({
             />
           </div>
           <div className="event-hud-clock">
-            <Countdown to={closeAt.toISOString()} />
+            <AuctionClock eventDate={eventDate} demo={isDemo} />
           </div>
           <div className="event-hud-floor">
-            <div className="event-hud-tape">
-              <div className="zone-list">{zoneRows}</div>
-            </div>
-            <div className="event-hud-dock">
-              <div className="event-bid">{bidBlock}</div>
+            <div className="zone-board">
+              <h2 id="zone-board-title" className="zone-board-title">
+                {zoneBoardTitle(open)}
+              </h2>
+              <div className="zone-list" aria-labelledby="zone-board-title">
+                {zoneRows}
+              </div>
+              {showDock ? (
+                <div className="event-hud-dock">
+                  <div className="event-bid">{bidBlock}</div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+export function zoneBoardTitle(auctionOpen: boolean) {
+  return auctionOpen ? "Zones" : "Meet the sponsors";
+}
+
+function zoneRowCopy(row: StageZone | undefined, auctionOpen: boolean) {
+  const name = ZONE_LABEL[row?.name ?? "chest_l"];
+  const winner = row?.occupied ? row.brandLabel?.trim() || null : null;
+  const sold = Boolean(winner && row?.current_cents);
+  if (!auctionOpen) {
+    return {
+      name,
+      lead: winner ?? "",
+      price: sold ? centsToUsd(row!.current_cents!) : "",
+      floor: false,
+    };
+  }
+  const athleteClosed = row?.status === "closed";
+  return {
+    name,
+    lead: winner ?? (athleteClosed ? "Closed" : "Open"),
+    price: row?.current_cents
+      ? centsToUsd(row.current_cents)
+      : athleteClosed
+        ? ""
+        : centsToUsd(FLOOR_CENTS),
+    floor: !row?.current_cents && !athleteClosed,
+  };
 }
 
 function pickDefaultZone(
@@ -527,56 +550,12 @@ function pickDefaultZone(
   return featuredSlot(zones).name;
 }
 
-function Countdown({ to }: { to: string }) {
-  const target = new Date(to).getTime();
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    const start = window.setTimeout(() => setNow(Date.now()), 0);
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      window.clearTimeout(start);
-      window.clearInterval(tick);
-    };
-  }, []);
-
-  if (now == null) {
-    return <p className="countdown">—</p>;
-  }
-
-  const remain = Math.max(0, target - now);
-  if (remain <= 0) {
-    return <p className="countdown is-closed">Closed</p>;
-  }
-
-  const days = Math.floor(remain / 86_400_000);
-  const hours = Math.floor((remain % 86_400_000) / 3_600_000);
-  const mins = Math.floor((remain % 3_600_000) / 60_000);
-  const secs = Math.floor((remain % 60_000) / 1000);
-  const hh = String(hours).padStart(2, "0");
-  const mm = String(mins).padStart(2, "0");
-  const ss = String(secs).padStart(2, "0");
-  const label = days > 0 ? `${days}d ${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}`;
-  return <p className="countdown">{label}</p>;
-}
-
 function isStageNotice(message: string) {
   return (
     message === "You're the lead." ||
-    message === "Logo is on the zone." ||
     message === "Zone closed." ||
     message === "Zone reopened." ||
     message.startsWith("Payment received")
-  );
-}
-
-function isBidStatus(value: string | undefined): value is BidStatus {
-  return (
-    value === "pending" ||
-    value === "held" ||
-    value === "refunded" ||
-    value === "won" ||
-    value === "failed"
   );
 }
 

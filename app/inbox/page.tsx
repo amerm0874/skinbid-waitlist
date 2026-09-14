@@ -5,13 +5,13 @@ import { getSessionUser, isAdminEmail } from "@/lib/auth";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 
 export const metadata: Metadata = {
-  title: "Waitlist inbox",
+  title: "Inbox",
   robots: { index: false, follow: false },
 };
 
 export const dynamic = "force-dynamic";
 
-type WaitlistRow = {
+type InboxRow = {
   email: string;
   name: string | null;
   role: string | null;
@@ -20,11 +20,11 @@ type WaitlistRow = {
   created_at: string;
 };
 
-function sportFrom(row: WaitlistRow) {
+function sportFrom(row: InboxRow) {
   return row.fields?.sport?.trim() || "—";
 }
 
-function socialFrom(row: WaitlistRow) {
+function socialFrom(row: InboxRow) {
   return row.instagram?.trim() || row.fields?.social?.trim() || "—";
 }
 
@@ -38,7 +38,7 @@ export default async function InboxPage() {
   }
 
   const admin = createAdminSupabase();
-  let rows: WaitlistRow[] = [];
+  let rows: InboxRow[] = [];
   let loadError = "";
 
   if (!admin) {
@@ -51,14 +51,14 @@ export default async function InboxPage() {
     if (error) {
       loadError = error.message;
     } else {
-      rows = (data ?? []) as WaitlistRow[];
+      rows = (data ?? []) as InboxRow[];
     }
   }
 
   return (
     <SiteShell>
       <main className="site-wrap py-[var(--block-y)]">
-        <h1 className="display text-[40px] md:text-[56px]">Waitlist inbox</h1>
+        <h1 className="display text-[40px] md:text-[56px]">Inbox</h1>
         <p className="mt-3 max-w-lg text-[15px] text-muted">
           {rows.length} saved. Admin only. A cookie cannot open this list.
         </p>

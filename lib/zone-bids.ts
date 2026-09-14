@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingColumn } from "@/lib/db-error";
+import { isMarkKind, type MarkKind } from "@/lib/logo";
 import type { BidStatus } from "@/lib/types";
 
 export type ZoneBidItem = {
@@ -117,4 +119,84 @@ export async function loadLastBidsByZone(
     unique.map(async (id) => [id, await loadLastZoneBids(db, id)] as const),
   );
   return Object.fromEntries(lists);
+}
+
+export type ZoneLead = {
+  amount_cents: number;
+  brand_id: string;
+  status: "held" | "won";
+  logo_url: string | null;
+  mark_kind: MarkKind | null;
+  post_rules: string | null;
+};
+
+const LEAD_SELECT =
+  "zone_id, amount_cents, status, brand_id, logo_url, mark_kind, post_rules";
+const LEAD_SELECT_BASE = "zone_id, amount_cents, status, brand_id";
+
+type LeadRow = {
+  zone_id: string;
+  amount_cents: number;
+  status: string;
+  brand_id: string;
+  logo_url?: string | null;
+  mark_kind?: string | null;
+  post_rules?: string | null;
+};
+
+function toLead(row: LeadRow): ZoneLead {
+  return {
+    amount_cents: row.amount_cents,
+    brand_id: row.brand_id,
+    status: row.status === "won" ? "won" : "held",
+    logo_url: row.logo_url?.trim() || null,
+    mark_kind: isMarkKind(row.mark_kind) ? row.mark_kind : null,
+    post_rules: row.post_rules?.trim() || null,
+  };
+}
+
+export async function loadLeadsByZone(
+  db: SupabaseClient,
+  zoneIds: string[],
+): Promise<Map<string, ZoneLead>> {
+  const unique = [...new Set(zoneIds.filter(isPersistedZoneId))];
+  const leads = new Map<string, ZoneLead>();
+  if (!unique.length) {
+    return leads;
+  }
+
+  let data: LeadRow[] | null = null;
+  let error: { message?: string; code?: string } | null = null;
+  const full = await db
+    .from("bids")
+    .select(LEAD_SELECT)
+    .in("zone_id", unique)
+    .in("status", ["held", "won"]);
+  if (full.error && isMissingColumn(full.error, "logo_url")) {
+    const base = await db
+      .from("bids")
+      .select(LEAD_SELECT_BASE)
+      .in("zone_id", unique)
+      .in("status", ["held", "won"]);
+    data = (base.data ?? null) as LeadRow[] | null;
+    error = base.error;
+  } else {
+    data = (full.data ?? null) as LeadRow[] | null;
+    error = full.error;
+  }
+  if (error) {
+    console.log("Zone leads failed", error.message);
+    return leads;
+  }
+
+  for (const row of (data ?? []) as LeadRow[]) {
+    if (row.status !== "held" && row.status !== "won") {
+      continue;
+    }
+    const current = leads.get(row.zone_id);
+    if (!current || row.amount_cents >= current.amount_cents) {
+      leads.set(row.zone_id, toLead(row));
+    }
+  }
+  return leads;
 }
