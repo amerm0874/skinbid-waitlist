@@ -85,7 +85,9 @@ export function LiveSlotCard({
   card: LiveSlotCardRow;
   eager?: boolean;
 }) {
-  const eventLine = card.raceName?.trim() || card.sport?.trim() || null;
+  const raceName = card.raceName?.trim() || null;
+  const sport = card.sport?.trim() || null;
+  const placeLine = [card.city, formatRaceDay(card.date)].filter(Boolean).join(" · ");
   const href = athleteProfilePath(card.handle) ?? `/e/${card.slug}`;
 
   return (
@@ -97,18 +99,21 @@ export function LiveSlotCard({
           name={card.athleteName}
           eager={eager}
         />
-        {card.sport ? <span className="athlete-card-sport">{card.sport}</span> : null}
+        {sport ? <span className="athlete-card-sport">{sport}</span> : null}
       </div>
       <div className="live-body-copy">
         <div className="live-body-ident">
-          <p className="live-body-name">
-            {card.athleteName}
-          </p>
-          {eventLine ? <p className="live-body-meta">{eventLine}</p> : null}
-          <p className="live-body-meta">{[card.city, formatRaceDay(card.date)].filter(Boolean).join(" · ")}</p>
+          <p className="live-body-name">{card.athleteName}</p>
+          {raceName ? <p className="live-body-meta">{raceName}</p> : null}
+          {placeLine ? <p className="live-body-meta">{placeLine}</p> : null}
         </div>
       </div>
-      <div className="athlete-card-footer"><span>View athlete</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 5l7 7-7 7" /></svg></div>
+      <div className="athlete-card-footer">
+        <span>View athlete</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <path d="M8 5l7 7-7 7" />
+        </svg>
+      </div>
     </EventLink>
   );
 }
