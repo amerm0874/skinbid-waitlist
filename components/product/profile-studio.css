@@ -66,6 +66,14 @@
 .product .intro-video-section h2 { font-size:18px; margin-bottom:12px; }
 .product .intro-video-section video { width:100%; max-height:360px; border-radius:10px; background:var(--surface); }
 .product .intro-video-section p { font-size:12px; color:var(--muted); line-height:1.7; margin-top:10px; }
+.product .media-status.is-error { color: var(--danger); }
+.product .placement-view-heading span { font-size: 12px; }
+.product .placement-box > span { font-size: 11px; }
+.product .media-upload-card,
+.product .placement-view,
+.product .me-race-card { min-width: 0; }
 @media(max-width:1100px) { .product .placement-workspace { grid-template-columns:1fr; } .product .placement-inspector { position:static; max-width:600px; } }
-@media(max-width:700px) { .product .profile-section-heading { flex-direction:column; gap:14px; } .product .profile-welcome h1 { font-size:32px; } .product .media-upload-grid, .product .media-review-grid, .product .me-zone-list { grid-template-columns:1fr; } .product .placement-pair { gap:8px; } .product .placement-view-heading { padding:12px; } .product .placement-view-heading span { display:none; } .product .placement-empty { padding:12px; min-height:240px; font-size:11px; } }
+@media(max-width:768px) { .product .media-upload-grid, .product .media-review-grid, .product .me-zone-list { grid-template-columns:1fr; } .product .profile-welcome h1 { font-size:36px; overflow-wrap:anywhere; } .product .media-review-pair { grid-template-columns:1fr; } }
+@media(max-width:700px) { .product .profile-section-heading { flex-direction:column; gap:14px; } .product .profile-welcome h1 { font-size:32px; } .product .placement-pair { gap:8px; } .product .placement-view-heading { padding:12px; } .product .placement-empty { padding:12px; min-height:240px; font-size:13px; } }
+@media(max-width:375px) { .product .placement-pair { grid-template-columns:1fr; } .product .media-upload-card { padding:16px; } }
 .product .form-shell.event-management { max-width:none; width:100%; }
