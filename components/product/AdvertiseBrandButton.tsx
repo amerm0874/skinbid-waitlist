@@ -1,6 +1,6 @@
 import { EventLink } from "@/components/product/EventLink";
 
-export const ADVERTISE_LABEL = "Advertise your brand";
+export const ADVERTISE_LABEL = "View available spots";
 
 export function AdvertiseBrandButton({
   slug,

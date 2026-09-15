@@ -5,6 +5,9 @@ import { getSessionUser } from "@/lib/auth";
 import type { Role } from "@/lib/config";
 import { publicAthleteHandle } from "@/lib/handle";
 import { countUnreadNotices } from "@/lib/notifications";
+import "@/components/product/product-studio.css";
+import "@/components/product/profile-studio.css";
+import { loadBodyPhotos } from "@/lib/body-photos";
 
 export async function ProductShell({
   email,
@@ -37,6 +40,10 @@ export async function ProductShell({
       ? await countUnreadNotices(session.supabase, session.user.id)
       : 0;
 
+  const avatarPhoto = resolvedRole === "athlete" && session.user && !session.profile?.photo_url
+    ? (await loadBodyPhotos(session.user.id)).front
+    : null;
+
   return (
     <div className={flush ? "product product-cage min-h-full bg-bg" : "product min-h-full bg-bg"}>
       <PostHogIdentify userId={session.user?.id} role={resolvedRole} />
@@ -48,7 +55,7 @@ export async function ProductShell({
         imageUrl={
           resolvedRole === "brand"
             ? session.profile?.logo_url
-            : session.profile?.photo_url
+            : session.profile?.photo_url || avatarPhoto
         }
         compact={flush}
         unread={unread}

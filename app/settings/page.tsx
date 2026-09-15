@@ -5,6 +5,7 @@ import { loginPath, sessionGateRedirect } from "@/lib/config";
 import { NO_OG_METADATA } from "@/lib/seo";
 import { ProductShell } from "@/components/product/ProductShell";
 import SettingsForm from "./SettingsForm";
+import { AccountGuide } from "@/components/product/AccountGuide";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -35,6 +36,7 @@ export default async function SettingsPage() {
           </p>
         </div>
         <SettingsForm userId={user.id} profile={profile} />
+        <AccountGuide role={profile.role} />
       </div>
     </ProductShell>
   );

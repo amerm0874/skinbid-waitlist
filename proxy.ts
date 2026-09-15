@@ -57,6 +57,17 @@ export async function proxy(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // Supabase can fall back to Site URL when a callback is not allow-listed.
+  // Complete that exchange before rendering the landing page or refreshing auth.
+  if (pathname === "/" && (request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("token_hash"))) {
+    const callback = request.nextUrl.clone();
+    callback.pathname = "/auth/callback";
+    const response = NextResponse.redirect(callback);
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("Referrer-Policy", "no-referrer");
+    return response;
+  }
+
   if (pathname === "/waitlist") {
     return NextResponse.redirect(new URL("/login", request.url));
   }

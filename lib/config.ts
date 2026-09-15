@@ -386,6 +386,21 @@ export function athleteOnboardingComplete(profile: {
   return athleteHasPayout(profile) && athleteIsAdult(profile);
 }
 
+// PayPal is optional on onboarding. A new athlete can still create a race.
+export function athleteCanCreateEvent(profile: {
+  role?: string | null;
+  dob?: string | null;
+  age?: number | null;
+  sport?: string | null;
+  sport_detail?: string | null;
+} | null | undefined) {
+  return (
+    profile?.role === "athlete" &&
+    athleteIsAdult(profile) &&
+    athleteSportComplete(profile)
+  );
+}
+
 export function pathAfterProfile(profile: {
   role?: string | null;
   name?: string | null;
@@ -401,7 +416,7 @@ export function pathAfterProfile(profile: {
   if (!profile?.role) {
     return "/onboarding";
   }
-  // PayPal is optional on athlete onboarding. Auction create still checks payout.
+  // PayPal is optional on athlete onboarding.
   if (
     profile.role === "athlete" &&
     (!athleteIsAdult(profile) || !athleteSportComplete(profile))

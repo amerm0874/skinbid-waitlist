@@ -1,11 +1,11 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { athleteOnboardingComplete, athleteSportComplete } from "@/lib/config";
+import { athleteIsAdult, athleteSportComplete } from "@/lib/config";
 import { isMissingColumn } from "@/lib/db-error";
 import {
   activeEvents,
-  athleteAvatarReady,
+  athletePublishReady,
   demoteLiveWithoutReadyGlb,
   insertErrorMessage,
   parseEventCreateBody,
@@ -13,15 +13,35 @@ import {
   type EventCreateBody,
 } from "@/lib/event-create";
 import { publicAthleteHandle } from "@/lib/handle";
+import { loadAthleteZoneRects } from "@/lib/athlete-zone-rects";
+import { drawnPhotoZones } from "@/lib/zone-photos";
+import { loadAthleteMedia } from "@/lib/athlete-media";
+
+async function reviewedMediaReady(athleteId: string) {
+  if (SHOW_3D_BODY) return true;
+  const media = await loadAthleteMedia(athleteId);
+  return Boolean(media?.approved_front && media.approved_back && media.video_path && media.video_shared);
+}
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
+
+async function hasPositionedSlots(db: NonNullable<Awaited<ReturnType<typeof getSessionUser>>["supabase"]>, athleteId: string) {
+  if (SHOW_3D_BODY) return true;
+  const saved = await loadAthleteZoneRects(db, athleteId);
+  return ["front", "back"].some((side) => drawnPhotoZones(side as "front" | "back", { saved, savedOnly: true }).length > 0);
+}
 
 export async function POST(request: Request) {
   const { supabase, user, profile } = await getSessionUser();
   if (!supabase || !user) {
     return NextResponse.json({ error: "Log in first." }, { status: 401 });
   }
-  if (profile?.role !== "athlete" || !athleteOnboardingComplete(profile)) {
+  if (
+    profile?.role !== "athlete" ||
+    !athleteIsAdult(profile) ||
+    !athleteSportComplete(profile)
+  ) {
     return NextResponse.json(
-      { error: "Finish athlete payout details first." },
+      { error: "Finish athlete onboarding first." },
       { status: 403 },
     );
   }
@@ -61,8 +81,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "That URL is taken." }, { status: 400 });
   }
 
-  // No ready GLB → draft. Never insert live without a scan.
-  const ready = await athleteAvatarReady(supabase, user.id);
+  // Photos publish the listing while SHOW_3D_BODY is false. No live insert without them.
+  const ready = await athletePublishReady(supabase, user.id) && await reviewedMediaReady(user.id) && await hasPositionedSlots(supabase, user.id);
   const status = ready ? "live" : "draft";
 
   const eventRow = {
@@ -153,9 +173,13 @@ export async function PATCH() {
   if (!supabase || !user) {
     return NextResponse.json({ error: "Log in first." }, { status: 401 });
   }
-  if (profile?.role !== "athlete" || !athleteOnboardingComplete(profile)) {
+  if (
+    profile?.role !== "athlete" ||
+    !athleteIsAdult(profile) ||
+    !athleteSportComplete(profile)
+  ) {
     return NextResponse.json(
-      { error: "Finish athlete payout details first." },
+      { error: "Finish athlete onboarding first." },
       { status: 403 },
     );
   }
@@ -173,11 +197,15 @@ export async function PATCH() {
     return NextResponse.json({ error: "No draft event to publish." }, { status: 400 });
   }
 
-  const ready = await athleteAvatarReady(supabase, user.id);
+  const ready = await athletePublishReady(supabase, user.id) && await reviewedMediaReady(user.id);
+  const notReadyCopy = "Finish your introduction video and approve both studio photos in your profile before publishing.";
+  if (!await hasPositionedSlots(supabase, user.id)) {
+    return NextResponse.json({ error: "Position at least one placement on your photo before publishing.", slug: active.draft.slug, status: "draft" }, { status: 400 });
+  }
   if (!ready) {
     return NextResponse.json(
       {
-        error: "Scan required.",
+        error: notReadyCopy,
         slug: active.draft.slug,
         status: "draft",
       },
@@ -198,7 +226,7 @@ export async function PATCH() {
     console.log("Event publish failed", error?.message);
     return NextResponse.json(
       {
-        error: "Scan required.",
+        error: notReadyCopy,
         slug: active.draft.slug,
         status: "draft",
       },
@@ -206,12 +234,12 @@ export async function PATCH() {
     );
   }
 
-  const stillReady = await athleteAvatarReady(supabase, user.id);
+  const stillReady = await athletePublishReady(supabase, user.id) && await reviewedMediaReady(user.id);
   if (!stillReady) {
     await demoteLiveWithoutReadyGlb(supabase, user.id);
     return NextResponse.json(
       {
-        error: "Scan required.",
+        error: notReadyCopy,
         slug: active.draft.slug,
         status: "draft",
       },

@@ -10,9 +10,14 @@ import {
 } from "@/lib/config";
 import { closeEventAuction } from "@/lib/close-auctions";
 import { DEMO_EVENT, DEMO_GLB, DEMO_SLUG } from "@/lib/demo-event";
-import { ensureEventZoneRows, isReadyAvatar } from "@/lib/event-create";
+import { ensureEventZoneRows, closeHiddenPhotoZones, eventPageReady } from "@/lib/event-create";
 import { loadDemoZoneLogos } from "@/lib/event-logo";
-import { loadBodyPhotos, type BodyPhotos } from "@/lib/body-photos";
+import {
+  loadBodyPhotos,
+  PUBLIC_BODY_PHOTOS,
+  PUBLIC_BODY_SLUGS,
+  type BodyPhotos,
+} from "@/lib/body-photos";
 import { publicAthleteHandle } from "@/lib/handle";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { loadEventSeo } from "@/lib/public-listings";
@@ -24,6 +29,8 @@ import {
   shareMetadata,
 } from "@/lib/seo";
 import { ZONE_NAMES } from "@/lib/zones";
+import { loadAthleteZoneRects, type AthleteZoneRects } from "@/lib/athlete-zone-rects";
+import { isHiddenPhotoZone } from "@/lib/zone-photos";
 import { ProductShell } from "@/components/product/ProductShell";
 import EventStage, { type StageZone } from "@/components/product/EventStage";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -100,19 +107,20 @@ export default async function EventPage({ params }: PageProps) {
   let zones: StageZone[] = emptyZones();
   let zoneBids: Record<string, ZoneBidItem[]> = {};
   let bodyPhotos: BodyPhotos = { front: null, back: null };
+  let savedRects: AthleteZoneRects = {};
   let found = false;
 
   if (slug === DEMO_SLUG) {
     found = true;
     glbUrl = DEMO_GLB;
-    bodyPhotos = { front: "/body/front.jpg", back: "/body/back.jpg" };
+    bodyPhotos = PUBLIC_BODY_PHOTOS;
     const demoLogos = await loadDemoZoneLogos();
     zones = ZONE_NAMES.map((name) => {
       const logoUrl = demoLogos.get(name) ?? null;
       return {
         id: `demo-${name}`,
         name,
-        status: "open",
+        status: isHiddenPhotoZone(name) ? "closed" : "open",
         occupied: Boolean(logoUrl),
         current_cents: null,
         brandLabel: logoUrl ? "Demo brand" : null,
@@ -126,7 +134,7 @@ export default async function EventPage({ params }: PageProps) {
       .eq("slug", slug)
       .maybeSingle();
 
-    // Draft, cancelled, or no ready GLB → 404. Demo uses the landing Alex GLB.
+    // Draft or cancelled → 404. Photos (or a real GLB) make the page public.
     const { data: avatar } =
       event && isPublishedEventStatus(event.status)
         ? await supabase
@@ -136,14 +144,22 @@ export default async function EventPage({ params }: PageProps) {
             .maybeSingle()
         : { data: null };
 
-    if (event && isPublishedEventStatus(event.status) && isReadyAvatar(avatar)) {
+    if (
+      event &&
+      isPublishedEventStatus(event.status) &&
+      (await eventPageReady({
+        slug,
+        athleteId: event.athlete_id,
+        avatar,
+      }))
+    ) {
       found = true;
       eventId = event.id;
       athleteId = event.athlete_id;
       eventName = event.name;
       eventDate = event.date;
       eventCity = event.city ?? null;
-      glbUrl = avatar.glb_url;
+      glbUrl = avatar?.glb_url?.trim() || "";
       bodyPhotos = await loadBodyPhotos(event.athlete_id);
 
       // Settle winners as soon as the page loads past T–48h. Do not wait on cron.
@@ -166,7 +182,11 @@ export default async function EventPage({ params }: PageProps) {
       const admin = createAdminSupabase();
       if (admin) {
         await ensureEventZoneRows(admin, event.id);
+        if (PUBLIC_BODY_SLUGS.has(slug)) {
+          await closeHiddenPhotoZones(admin, event.id);
+        }
       }
+      savedRects = await loadAthleteZoneRects(admin ?? supabase, event.athlete_id);
       const { data: zoneRows } = await supabase
         .from("zones")
         .select("id, name, status")
@@ -180,9 +200,15 @@ export default async function EventPage({ params }: PageProps) {
       const { data: brands } = brandIds.length
         ? await supabase
             .from("profiles")
-            .select("id, name")
+            .select("id, name, website")
             .in("id", brandIds)
-        : { data: [] as Array<{ id: string; name: string | null }> };
+        : {
+            data: [] as Array<{
+              id: string;
+              name: string | null;
+              website: string | null;
+            }>,
+          };
       const brandMap = new Map((brands ?? []).map((row) => [row.id, row]));
       const rowByName = new Map((zoneRows ?? []).map((row) => [row.name, row]));
 
@@ -196,12 +222,16 @@ export default async function EventPage({ params }: PageProps) {
         return {
           id: row?.id ?? `missing-${name}`,
           name,
-          status: (row?.status as "open" | "closed") ?? "closed",
+          status:
+            isHiddenPhotoZone(name)
+              ? "closed"
+              : ((row?.status as "open" | "closed") ?? "closed"),
           occupied: Boolean(held),
           current_cents: held?.amount_cents ?? null,
           leadStatus: held?.status ?? null,
           brandId: held?.brand_id ?? null,
           brandLabel: brand?.name ?? null,
+          brandWebsite: brand?.website ?? null,
           logoUrl: held?.logo_url ?? null,
         };
       });
@@ -259,6 +289,8 @@ export default async function EventPage({ params }: PageProps) {
         currentBrandId={profile?.role === "brand" ? profile.id : null}
         brandLogoUrl={profile?.role === "brand" ? profile.logo_url : null}
         zoneBids={zoneBids}
+        savedRects={savedRects}
+        useDefaultRects={false}
       />
     </ProductShell>
   );

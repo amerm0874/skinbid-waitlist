@@ -1,7 +1,11 @@
 import { normalizeEventSlug } from "@/lib/auction";
 import { athleteSportLabel, displayAge, FLOOR_CENTS } from "@/lib/config";
 import { loadAthleteProfileClipUrls } from "@/lib/capture-state";
-import { isReadyAvatar } from "@/lib/event-create";
+import { isReadyAvatar, athleteIdsWithBodyPhotos } from "@/lib/event-create";
+import { PUBLIC_BODY_SLUGS, loadBodyPhotos } from "@/lib/body-photos";
+import { loadAthleteZoneRects } from "@/lib/athlete-zone-rects";
+import { drawnPhotoZones } from "@/lib/zone-photos";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
 import { publicAthleteHandle } from "@/lib/handle";
 import {
   OFFICIAL_EVENTS,
@@ -219,7 +223,16 @@ export async function loadLiveSlotCards(supabase: Db | null) {
       .map((row) => [row.athlete_id, row.glb_url.trim()]),
   );
 
-  const live = rows.filter((row) => glbByAthlete.has(row.athlete_id));
+  const photoReady = SHOW_3D_BODY
+    ? new Set<string>()
+    : await athleteIdsWithBodyPhotos(athleteIds);
+
+  const live = rows.filter(
+    (row) =>
+      glbByAthlete.has(row.athlete_id) ||
+      photoReady.has(row.athlete_id) ||
+      PUBLIC_BODY_SLUGS.has(row.slug),
+  );
   const profiles = await loadLiveAthleteProfiles(
     supabase,
     live.map((row) => row.athlete_id),
@@ -235,9 +248,14 @@ export async function loadLiveSlotCards(supabase: Db | null) {
     .map((row) => row.athlete_id)
     .filter((id) => !byId.get(id)?.photo_url?.trim());
   const clips = await loadAthleteProfileClipUrls(missingPhoto);
+  const bodyPortraits = new Map(await Promise.all([...new Set(missingPhoto)].map(async (id) => [id, (await loadBodyPhotos(id)).front] as const)));
+  const placementMaps = new Map(await Promise.all([...new Set(live.map((row) => row.athlete_id))].map(async (id) => [id, await loadAthleteZoneRects(supabase, id)] as const)));
 
-  return live.map((row) => {
-    const zones = (row.zones ?? []) as ZoneRow[];
+  return live.flatMap((row) => {
+    const saved = placementMaps.get(row.athlete_id);
+    const placed = new Set<string>([...drawnPhotoZones("front", { saved, savedOnly: true }), ...drawnPhotoZones("back", { saved, savedOnly: true })]);
+    const zones = ((row.zones ?? []) as ZoneRow[]).filter((zone) => SHOW_3D_BODY || placed.has(zone.name));
+    if (!zones.some((zone) => zone.status === "open")) return [];
     const profile = byId.get(row.athlete_id);
     const sport =
       athleteSportLabel(profile?.sport, profile?.sport_detail) ??
@@ -252,7 +270,7 @@ export async function loadLiveSlotCards(supabase: Db | null) {
       })),
     );
     const athleteName = profile?.name?.trim() || "Athlete";
-    const photoUrl = profile?.photo_url?.trim() || null;
+    const photoUrl = profile?.photo_url?.trim() || bodyPortraits.get(row.athlete_id) || null;
     return {
       id: row.id,
       name: row.name,

@@ -85,8 +85,8 @@ export default async function WinnerLogoPage({ params, searchParams }: PageProps
       <TrackOnce event="logo_desk_opened" slug={slug} />
       <div className="page-stack">
         <div>
-          <p className="slot-board-kicker">Lead logo</p>
-          <h1 className="page-title">Zone mark</h1>
+          <p className="page-lead">Your sponsorship artwork</p>
+          <h1 className="page-title">Place your logo</h1>
         </div>
 
         {canUpload ? (

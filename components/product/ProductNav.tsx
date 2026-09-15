@@ -56,6 +56,7 @@ export function ProductNav({
         >
           SKINBID
         </Link>
+        <ProductTabs />
         <nav className="nav-links">
           {email ? (
             <>
@@ -94,7 +95,6 @@ export function ProductNav({
           )}
         </nav>
       </div>
-      {compact ? null : <ProductTabs />}
     </header>
   );
 }

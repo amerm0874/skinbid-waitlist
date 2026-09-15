@@ -20,6 +20,10 @@ import {
   shareMetadata,
 } from "@/lib/seo";
 import { publicShareSocials } from "@/lib/socials";
+import Link from "next/link";
+import { centsToUsd } from "@/lib/money";
+import { loadBodyPhotos } from "@/lib/body-photos";
+import { loadIntroductionVideo } from "@/lib/athlete-media";
 
 type PageProps = {
   params: Promise<{ handle: string }>;
@@ -73,7 +77,12 @@ export default async function AthletePage({ params }: PageProps) {
         slug: null as string | null,
       }
     : null);
-  const profileClipUrl = await loadAthleteProfileClipUrl(athlete.id);
+  const [profileClipUrl, bodyPhotos, introductionVideo] = await Promise.all([
+    loadAthleteProfileClipUrl(athlete.id),
+    athlete.photoUrl ? Promise.resolve(null) : loadBodyPhotos(athlete.id),
+    loadIntroductionVideo(athlete.id),
+  ]);
+  const portraitUrl = athlete.photoUrl ?? bodyPhotos?.front;
   const bits = [athlete.age, sport, live?.city ?? athlete.race?.city, athlete.country]
     .filter((value) => value != null && String(value).trim())
     .map(String);
@@ -98,14 +107,15 @@ export default async function AthletePage({ params }: PageProps) {
         })}
       />
 
+      <nav className="studio-breadcrumb" aria-label="Breadcrumb"><Link href="/athletes">Athletes</Link><span aria-hidden="true">/</span><span>{athlete.name}</span></nav>
       <div className="athlete-page">
         {profileClipUrl ? (
           <div className="athlete-face has-photo">
             <ProfileClip src={profileClipUrl} />
           </div>
-        ) : athlete.photoUrl ? (
+        ) : portraitUrl ? (
           <div className="athlete-face has-photo">
-            <img src={athlete.photoUrl} alt="" className="athlete-face-photo" />
+            <img src={portraitUrl} alt={athlete.name} className="athlete-face-photo" />
           </div>
         ) : (
           <div className="athlete-face">
@@ -115,7 +125,9 @@ export default async function AthletePage({ params }: PageProps) {
           </div>
         )}
 
-        <header className="athlete-meet">
+        <div className="athlete-details">
+        <header className={live ? "athlete-meet is-listed" : "athlete-meet"}>
+          {live ? <p className="availability-note">Open for sponsorship</p> : null}
           <h1 className="athlete-meet-name">{athlete.name}</h1>
           {bits.length > 0 ? (
             <p className="athlete-meet-meta">{bits.join(" · ")}</p>
@@ -123,7 +135,8 @@ export default async function AthletePage({ params }: PageProps) {
         </header>
 
         {nextRace ? (
-          <section className="athlete-next">
+          <section className={live ? "athlete-next is-live" : "athlete-next"}>
+            <p className="athlete-live-label">Next on the start line</p>
             <p className="athlete-next-name">{nextRace.name}</p>
             <p className="athlete-next-meta">
               {[nextRace.city, formatRaceDay(nextRace.date)]
@@ -135,14 +148,17 @@ export default async function AthletePage({ params }: PageProps) {
         ) : null}
 
         {live && live.openZones.length > 0 ? (
-          <ul className="athlete-zones">
-            {live.openZones.map((zone) => (
-              <li key={zone}>{zone}</li>
-            ))}
-          </ul>
+          <section className="athlete-inventory">
+            <p className="athlete-live-label">Available spots</p>
+            <ul className="athlete-zones">
+              {live.openZones.map((zone) => (
+                <li key={zone}>{zone}</li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
-        {live ? <AdvertiseBrandButton slug={live.slug} full /> : null}
+        {live ? <div className="athlete-booking"><div><span>Placement from</span><strong>{centsToUsd(live.slotCents)}</strong></div><AdvertiseBrandButton slug={live.slug} full /><p>Choose a placement on {athlete.name.split(" ")[0]}’s photo. Review your bid before checkout.</p></div> : null}
 
         {socials.length > 0 ? (
           <ul className="athlete-socials">
@@ -162,7 +178,10 @@ export default async function AthletePage({ params }: PageProps) {
           </ul>
         ) : null}
 
+        {introductionVideo ? <section className="intro-video-section"><h2>Meet {athlete.name.split(" ")[0]}</h2><video src={introductionVideo} controls playsInline preload="metadata" aria-label={`${athlete.name}'s introduction video`} /><p>An introduction uploaded by the athlete. Compare it with their photos; uploading a video does not mean Skinbid has verified their identity.</p></section> : null}
+
         {live ? null : <EmptyState line="No live event." />}
+        </div>
       </div>
     </ProductShell>
   );

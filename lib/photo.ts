@@ -216,3 +216,45 @@ export async function uploadProfilePhoto(userId: string, file: File) {
   const publicUrl = supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
   return `${publicUrl}?v=${Date.now()}`;
 }
+
+export const MAX_BODY_PHOTO_BYTES = 8 * 1024 * 1024;
+
+export function bodyPhotoClientError(file: File | null) {
+  if (!file) {
+    return "Add a JPG or PNG photo.";
+  }
+  if (!isPhotoFile(file)) {
+    return "Photo must be a JPG or PNG.";
+  }
+  if (file.size > MAX_BODY_PHOTO_BYTES) {
+    return "Photo must be under 8 MB.";
+  }
+  return "";
+}
+
+export async function uploadBodyPhoto(
+  userId: string,
+  side: "front" | "back",
+  file: File,
+) {
+  const reason = bodyPhotoClientError(file);
+  if (reason) {
+    throw new Error(reason);
+  }
+  const form = new FormData();
+  form.set("side", side);
+  form.set("file", file);
+  const response = await fetch("/api/body-photos", {
+    method: "POST",
+    body: form,
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    error?: string;
+    url?: string;
+  } | null;
+  if (!response.ok || !payload?.url) {
+    throw new Error(payload?.error || "Could not upload the photo.");
+  }
+  console.log("Body photo uploaded", side, userId);
+  return payload.url;
+}

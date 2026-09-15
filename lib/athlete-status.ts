@@ -55,7 +55,7 @@ export function athleteEventStatus(input: {
   if (input.status === "draft") {
     return {
       phase: "draft",
-      line: "Your listing isn’t public.",
+      line: "Almost done. Finish your photos and placements, then publish your race.",
       action: { href: "/new", label: "Finish listing" },
     };
   }
@@ -64,10 +64,10 @@ export function athleteEventStatus(input: {
     return { phase: "approved", line: "Proof approved.", action: null };
   }
   if (proof === "pending") {
-    return { phase: "proof_pending", line: "Proof is pending.", action: null };
+    return { phase: "proof_pending", line: "Your race-day proof is being reviewed.", action: null };
   }
   if (proof === "rejected") {
-    return { phase: "rejected", line: "Proof rejected.", action: proofAction };
+    return { phase: "rejected", line: "Your proof needs another look. Upload clearer race-day photos.", action: proofAction };
   }
 
   if (listingClosed && isEventOver(input.eventDate, now)) {
@@ -79,16 +79,16 @@ export function athleteEventStatus(input: {
 
   if (listingClosed) {
     if (input.hasWonZone || input.hasBids) {
-      return { phase: "wear", line: "Wear the mark.", action: eventAction };
+      return { phase: "wear", line: "Your sponsors are confirmed. Download their logos and wear them on race day.", action: eventAction };
     }
     return { phase: "wear", line: "Auction closed.", action: eventAction };
   }
 
   if (input.hasBids) {
-    return { phase: "live_bids", line: "Bids are in.", action: eventAction };
+    return { phase: "live_bids", line: "Brands are bidding. Follow your placements and current leading bids below.", action: eventAction };
   }
 
-  return { phase: "live_empty", line: "Wait for a bid.", action: eventAction };
+  return { phase: "live_empty", line: "You’re live. Share your athlete profile to help brands find your race.", action: eventAction };
 }
 
 export function logoPrintLine(zoneLabel: string) {

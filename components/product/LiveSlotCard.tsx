@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { EventLink } from "@/components/product/EventLink";
-import { FLOOR_CENTS } from "@/lib/config";
 import { athleteProfilePath } from "@/lib/handle";
+import { formatRaceDay } from "@/lib/official-events";
 import type { LiveSlotCard as LiveSlotCardRow } from "@/lib/live-listings";
 
 function nameInitial(name: string) {
@@ -86,7 +86,6 @@ export function LiveSlotCard({
   eager?: boolean;
 }) {
   const eventLine = card.raceName?.trim() || card.sport?.trim() || null;
-  const showFloor = card.priceCents === FLOOR_CENTS;
   const href = athleteProfilePath(card.handle) ?? `/e/${card.slug}`;
 
   return (
@@ -98,20 +97,18 @@ export function LiveSlotCard({
           name={card.athleteName}
           eager={eager}
         />
+        {card.sport ? <span className="athlete-card-sport">{card.sport}</span> : null}
       </div>
       <div className="live-body-copy">
-        <p className="live-body-name">
-          {card.athleteName}
-          {showFloor ? (
-            <span className="live-body-floor" title="Open at $100" />
-          ) : null}
-        </p>
-        {card.age != null ? (
-          <p className="live-body-meta">{card.age}</p>
-        ) : null}
-        {eventLine ? <p className="live-body-meta">{eventLine}</p> : null}
-        {card.city ? <p className="live-body-meta">{card.city}</p> : null}
+        <div className="live-body-ident">
+          <p className="live-body-name">
+            {card.athleteName}
+          </p>
+          {eventLine ? <p className="live-body-meta">{eventLine}</p> : null}
+          <p className="live-body-meta">{[card.city, formatRaceDay(card.date)].filter(Boolean).join(" · ")}</p>
+        </div>
       </div>
+      <div className="athlete-card-footer"><span>View athlete</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 5l7 7-7 7" /></svg></div>
     </EventLink>
   );
 }

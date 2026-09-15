@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ZONE_LABEL, type ZoneName } from "@/lib/zones";
 import {
+  drawnPhotoZones,
   zonePlacement,
-  zonesOnPhoto,
+  zonePhotoSide,
   type ZonePhotoSide,
+  type ZoneRect,
 } from "@/lib/zone-photos";
 
 export type PhotoZone = {
@@ -22,15 +24,15 @@ type Props = {
   zones: PhotoZone[];
   selected: ZoneName | null;
   onSelect: (name: ZoneName) => void;
+  onClear?: () => void;
   athleteName: string;
-  frameNonce?: number;
+  savedRects?: Partial<Record<ZoneName, ZoneRect>> | null;
+  useDefaultRects?: boolean;
 };
 
 type Box = { x: number; y: number; w: number; h: number };
 
-const FRAME_SCALE = 1.85;
-
-function containedBox(
+function photoBox(
   containerW: number,
   containerH: number,
   imageW: number,
@@ -39,9 +41,9 @@ function containedBox(
   if (containerW < 1 || containerH < 1 || imageW < 1 || imageH < 1) {
     return null;
   }
-  const scale = Math.min(containerW / imageW, containerH / imageH);
-  const w = imageW * scale;
-  const h = imageH * scale;
+  const fit = Math.min(containerW / imageW, containerH / imageH);
+  const w = imageW * fit;
+  const h = imageH * fit;
   return {
     x: (containerW - w) / 2,
     y: (containerH - h) / 2,
@@ -50,27 +52,32 @@ function containedBox(
   };
 }
 
-export default function PhotoStage({
-  frontUrl,
-  backUrl,
+function PhotoPane({
+  url,
+  side,
+  athleteName,
   zones,
+  savedRects,
   selected,
   onSelect,
-  athleteName,
-  frameNonce = 0,
-}: Props) {
+  onClear,
+  useDefaultRects,
+}: {
+  url: string | null;
+  side: ZonePhotoSide;
+  athleteName: string;
+  zones: PhotoZone[];
+  savedRects?: Partial<Record<ZoneName, ZoneRect>> | null;
+  selected: ZoneName | null;
+  onSelect: (name: ZoneName) => void;
+  onClear?: () => void;
+  useDefaultRects: boolean;
+}) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
-  const [side, setSide] = useState<ZonePhotoSide>("front");
   const [natural, setNatural] = useState({ w: 0, h: 0 });
+  const [failed, setFailed] = useState(false);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
-
-  useEffect(() => {
-    if (!selected) {
-      return;
-    }
-    setSide(zonePlacement(selected).photo);
-  }, [selected]);
 
   useEffect(() => {
     const node = viewportRef.current;
@@ -86,25 +93,135 @@ export default function PhotoStage({
     return () => observer.disconnect();
   }, []);
 
-  const photoUrl = side === "front" ? frontUrl : backUrl;
-
   useEffect(() => {
-    setNatural({ w: 0, h: 0 });
     const img = imgRef.current;
     if (img?.complete && img.naturalWidth) {
       setNatural({ w: img.naturalWidth, h: img.naturalHeight });
     }
-  }, [photoUrl]);
+  }, [url]);
 
-  const map = containedBox(viewport.w, viewport.h, natural.w, natural.h);
   const byName = new Map(zones.map((zone) => [zone.name, zone]));
-  const visible = zonesOnPhoto(side).filter(() => Boolean(photoUrl));
-  const framed =
-    frameNonce > 0 && selected && zonePlacement(selected).photo === side
-      ? selected
-      : null;
-  const focus = framed && map ? zoneFocus(framed, map) : null;
+  const closed = new Set(
+    zones.filter((zone) => zone.status === "closed").map((zone) => zone.name),
+  );
+  const visible = url
+    ? drawnPhotoZones(side, {
+        saved: savedRects,
+        closed,
+        savedOnly: !useDefaultRects,
+      })
+    : [];
+  const map = photoBox(viewport.w, viewport.h, natural.w, natural.h);
 
+  return (
+    <div className="photo-stage-pane" data-side={side}>
+      <div className="photo-stage-viewport" ref={viewportRef}>
+        {url && !failed ? (
+          // Athlete photo from storage; next/image needs a host allow-list.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={imgRef}
+            src={url}
+            alt={`${athleteName} ${side}`}
+            className="photo-stage-photo"
+            draggable={false}
+            style={
+              map
+                ? {
+                    inset: "auto",
+                    left: map.x,
+                    top: map.y,
+                    width: map.w,
+                    height: map.h,
+                    objectFit: "fill",
+                  }
+                : undefined
+            }
+            onLoad={(event) => {
+              setNatural({
+                w: event.currentTarget.naturalWidth,
+                h: event.currentTarget.naturalHeight,
+              });
+            }}
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <p className="photo-stage-missing" role="status">{failed ? "Photo could not load. Refresh the page to try again." : `No ${side} photo yet.`}</p>
+        )}
+
+        {map && !failed ? (
+          <div
+            className="photo-stage-map"
+            style={{
+              left: map.x,
+              top: map.y,
+              width: map.w,
+              height: map.h,
+            }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                onClear?.();
+              }
+            }}
+          >
+            {visible.map((name) => {
+              const zone = byName.get(name);
+              const { rect } = zonePlacement(name, savedRects);
+              const isOn = selected === name;
+              const logo = zone?.logoUrl?.trim() || null;
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={isOn}
+                  aria-label={ZONE_LABEL[name]}
+                  className={`photo-zone${isOn ? " is-on" : ""}${
+                    logo ? " is-filled" : ""
+                  }`}
+                  style={{
+                    left: `${rect.x}%`,
+                    top: `${rect.y}%`,
+                    width: `${rect.w}%`,
+                    height: `${rect.h}%`,
+                  }}
+                  onClick={() => onSelect(name)}
+                >
+                  {logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={logo}
+                      alt=""
+                      className="photo-zone-logo"
+                      draggable={false}
+                    />
+                  ) : (
+                    <span className="photo-zone-plus" aria-hidden="true">
+                      +
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export default function PhotoStage({
+  frontUrl,
+  backUrl,
+  zones,
+  selected,
+  onSelect,
+  onClear,
+  athleteName,
+  savedRects = null,
+  useDefaultRects = false,
+}: Props) {
+  const [view, setView] = useState<ZonePhotoSide>(frontUrl ? "front" : "back");
+  const side = selected ? zonePhotoSide(selected) : view;
   if (!frontUrl && !backUrl) {
     return (
       <div className="photo-stage photo-stage-empty">
@@ -118,117 +235,40 @@ export default function PhotoStage({
 
   return (
     <div className="photo-stage">
-      <div className="photo-stage-viewport" ref={viewportRef}>
-        <div
-          className="photo-stage-inner"
-          style={
-            focus && viewport.w && viewport.h
-              ? {
-                  transformOrigin: `${(focus.x / viewport.w) * 100}% ${
-                    (focus.y / viewport.h) * 100
-                  }%`,
-                  transform: `translate(${50 - (focus.x / viewport.w) * 100}%, ${
-                    50 - (focus.y / viewport.h) * 100
-                  }%) scale(${FRAME_SCALE})`,
-                }
-              : undefined
-          }
-        >
-          {photoUrl ? (
-            // Athlete photo from storage; next/image needs a host allow-list.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              ref={imgRef}
-              src={photoUrl}
-              alt={`${athleteName} ${side}`}
-              className="photo-stage-photo"
-              draggable={false}
-              onLoad={(event) => {
-                setNatural({
-                  w: event.currentTarget.naturalWidth,
-                  h: event.currentTarget.naturalHeight,
-                });
-              }}
-            />
-          ) : (
-            <p className="photo-stage-missing">No {side} photo yet.</p>
-          )}
-
-          {map ? (
-            <div
-              className="photo-stage-map"
-              style={{
-                left: map.x,
-                top: map.y,
-                width: map.w,
-                height: map.h,
-              }}
-            >
-              {visible.map((name) => {
-                const zone = byName.get(name);
-                const { rect } = zonePlacement(name);
-                const isOn = selected === name;
-                const logo = zone?.logoUrl?.trim() || null;
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    aria-pressed={isOn}
-                    aria-label={ZONE_LABEL[name]}
-                    className={`photo-zone${isOn ? " is-on" : ""}${
-                      logo ? " is-filled" : ""
-                    }${zone?.status === "closed" ? " is-closed" : ""}`}
-                    style={{
-                      left: `${rect.x}%`,
-                      top: `${rect.y}%`,
-                      width: `${rect.w}%`,
-                      height: `${rect.h}%`,
-                    }}
-                    onClick={() => onSelect(name)}
-                  >
-                    {logo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={logo}
-                        alt=""
-                        className="photo-zone-logo"
-                        draggable={false}
-                      />
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+      <div className="photo-view-controls" role="group" aria-label="Photo view">
+        {(["front", "back"] as const).map((value) => <button key={value} type="button" aria-pressed={side === value} disabled={value === "front" ? !frontUrl : !backUrl} onClick={() => { onClear?.(); setView(value); }}>{value === "front" ? "Front view" : "Back view"}</button>)}
       </div>
-
-      {frontUrl && backUrl ? (
-        <div className="photo-stage-sides">
-          <button
-            type="button"
-            className={`photo-stage-side${side === "front" ? " is-on" : ""}`}
-            onClick={() => setSide("front")}
-          >
-            Front
-          </button>
-          <button
-            type="button"
-            className={`photo-stage-side${side === "back" ? " is-on" : ""}`}
-            onClick={() => setSide("back")}
-          >
-            Back
-          </button>
-        </div>
-      ) : null}
+      <div className="photo-stage-split is-single">
+        {side === "front" ? (
+          <PhotoPane
+            key={`front-${frontUrl}`}
+            url={frontUrl}
+            side="front"
+            athleteName={athleteName}
+            zones={zones}
+            savedRects={savedRects}
+            selected={selected}
+            onSelect={onSelect}
+            onClear={onClear}
+            useDefaultRects={useDefaultRects}
+          />
+        ) : null}
+        {side === "back" ? (
+          <PhotoPane
+            key={`back-${backUrl}`}
+            url={backUrl}
+            side="back"
+            athleteName={athleteName}
+            zones={zones}
+            savedRects={savedRects}
+            selected={selected}
+            onSelect={onSelect}
+            onClear={onClear}
+            useDefaultRects={useDefaultRects}
+          />
+        ) : null}
+      </div>
+      <p className="photo-caption">{selected ? ZONE_LABEL[selected] : "Placements are positioned by the athlete"}</p>
     </div>
   );
-}
-
-function zoneFocus(name: ZoneName, map: Box) {
-  const { rect } = zonePlacement(name);
-  return {
-    x: map.x + (map.w * (rect.x + rect.w / 2)) / 100,
-    y: map.y + (map.h * (rect.y + rect.h / 2)) / 100,
-  };
 }

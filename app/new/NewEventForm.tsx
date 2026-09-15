@@ -32,10 +32,14 @@ import {
   formatOfficialOption,
   type OfficialEvent,
 } from "@/lib/official-events";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
 import { ZONE_NAMES, type ZoneName } from "@/lib/zones";
 import CountrySelect from "@/components/product/CountrySelect";
 import { CapturePlaceholder } from "@/components/product/CapturePlaceholder";
 import ZoneBodyPicker from "@/components/product/ZoneBodyPicker";
+import { ZoneSlotPlacer } from "@/components/product/ZoneSlotPlacer";
+import type { AthleteZoneRects } from "@/lib/athlete-zone-rects";
+import type { BodyPhotos } from "@/lib/body-photos";
 
 const initialZones = Object.fromEntries(
   ZONE_NAMES.map((name) => [name, "open"]),
@@ -55,6 +59,8 @@ export default function NewEventForm({
   profileSportDetail,
   officialEvents,
   prefillRace,
+  bodyPhotos,
+  savedRects,
 }: {
   userId: string;
   avatarReady: boolean;
@@ -67,6 +73,8 @@ export default function NewEventForm({
   profileSportDetail?: string | null;
   officialEvents?: OfficialEvent[];
   prefillRace?: OfficialEvent | null;
+  bodyPhotos: BodyPhotos;
+  savedRects: AthleteZoneRects;
 }) {
   const [savedDraft, setSavedDraft] = useState<ListedEvent | null>(null);
   const [justUploadedScan, setJustUploadedScan] = useState(false);
@@ -79,9 +87,26 @@ export default function NewEventForm({
   }, [modelPaid]);
 
   if (existing?.status === "live") {
-    return <LiveNotice event={existing} />;
+    return (
+      <LiveNotice
+        event={existing}
+        athleteId={userId}
+        bodyPhotos={bodyPhotos}
+        savedRects={savedRects}
+      />
+    );
   }
   if (draft) {
+    if (!SHOW_3D_BODY) {
+      return (
+        <DraftPhotoForm
+          userId={userId}
+          event={draft}
+          bodyPhotos={bodyPhotos}
+          savedRects={savedRects}
+        />
+      );
+    }
     return (
       <DraftPublishForm
         userId={userId}
@@ -90,6 +115,8 @@ export default function NewEventForm({
         modelPaid={paid}
         onModelPaid={markPaid}
         event={draft}
+        bodyPhotos={bodyPhotos}
+        savedRects={savedRects}
       />
     );
   }
@@ -111,20 +138,121 @@ export default function NewEventForm({
   );
 }
 
-function LiveNotice({ event }: { event: ListedEvent }) {
+function LiveNotice({
+  event,
+  athleteId,
+  bodyPhotos,
+  savedRects,
+}: {
+  event: ListedEvent;
+  athleteId: string;
+  bodyPhotos: BodyPhotos;
+  savedRects: AthleteZoneRects;
+}) {
   return (
-    <div className="form-shell max-w-lg">
+    <div className="form-shell event-management">
       <p className="font-mono text-[11px] tracking-[0.14em] text-accent">LIVE</p>
       <h2 className="mt-2 text-[22px] font-semibold">{event.name}</h2>
       <p className="mt-2 text-[14px] text-muted">
-        One live event at a time. List the next after this one closes.
+        Adjust your available placements. Positions with paid or pending bids stay locked.
       </p>
       <p className="mt-3 font-mono text-[12px] text-muted">
         {event.city ?? "-"} · {event.sport ?? "-"} · {formatEventDate(event.date)}
       </p>
       <Link href={`/e/${event.slug}`} className="btn btn-solid mt-6">
-        Open /e/{event.slug}
+        View your race page
       </Link>
+      <Link href="/me" className="btn btn-ghost mt-3">
+        Skip
+      </Link>
+      <div className="mt-6">
+        <ZoneSlotPlacer
+          athleteId={athleteId}
+          frontUrl={bodyPhotos.front}
+          backUrl={bodyPhotos.back}
+          savedRects={savedRects}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DraftPhotoForm({
+  userId,
+  event,
+  bodyPhotos,
+  savedRects,
+}: {
+  userId: string;
+  event: ListedEvent;
+  bodyPhotos: BodyPhotos;
+  savedRects: AthleteZoneRects;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [photos, setPhotos] = useState(bodyPhotos);
+  const [hasPlacement, setHasPlacement] = useState(Object.keys(savedRects).some((name) => !name.startsWith("shoulder")));
+  const canPublish = Boolean(photos.front && photos.back && hasPlacement);
+
+  async function handlePublish() {
+    setBusy(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch("/api/events", { method: "PATCH" });
+      const payload = (await response.json()) as {
+        error?: string;
+        slug?: string;
+        status?: string;
+      };
+      if (!response.ok || payload.status !== "live" || !payload.slug) {
+        setErrorMessage(payload.error || "Upload a front and back photo first.");
+        return;
+      }
+      console.log("Event published", payload.slug);
+      router.push(`/e/${payload.slug}`);
+    } catch (error) {
+      console.log("Event publish failed", error);
+      setErrorMessage(error instanceof Error ? error.message : "Could not publish.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="form-shell event-management">
+      <p className="font-mono text-[11px] tracking-[0.14em] text-accent">
+        Place your slots
+      </p>
+      <h2 className="mt-2 text-[22px] font-semibold">{event.name}</h2>
+      <p className="mt-2 text-[14px] text-muted">
+        Prepare your photos and introduction video in your profile. Then choose
+        and position your sponsorship placements before publishing.
+      </p>
+      <p className="mt-3 font-mono text-[12px] text-muted">
+        {event.city ?? "-"} · {event.sport ?? "-"} · {formatEventDate(event.date)}
+      </p>
+
+      <div className="mt-6">
+        <ZoneSlotPlacer
+          athleteId={userId}
+          frontUrl={photos.front}
+          backUrl={photos.back}
+          savedRects={savedRects}
+          onPhotosChange={setPhotos}
+          onPlacementSaved={() => setHasPlacement(true)}
+        />
+      </div>
+
+      {errorMessage ? <p className="mt-4 text-[13px] text-danger">{errorMessage}</p> : null}
+      <button
+        type="button"
+        disabled={busy || !canPublish}
+        className="btn btn-solid mt-6"
+        onClick={() => void handlePublish()}
+      >
+        {busy ? "Publishing…" : canPublish ? "Publish event" : !photos.front || !photos.back ? "Prepare your photos first" : "Save a placement first"}
+      </button>
       <Link href="/me" className="btn btn-ghost mt-3">
         Skip
       </Link>
@@ -139,6 +267,8 @@ function DraftPublishForm({
   modelPaid,
   onModelPaid,
   event,
+  bodyPhotos,
+  savedRects,
 }: {
   userId: string;
   avatarReady: boolean;
@@ -146,6 +276,8 @@ function DraftPublishForm({
   modelPaid: boolean;
   onModelPaid: () => void;
   event: ListedEvent;
+  bodyPhotos: BodyPhotos;
+  savedRects: AthleteZoneRects;
 }) {
   const router = useRouter();
   const capture = useCaptureFiles();
@@ -232,6 +364,15 @@ function DraftPublishForm({
       <p className="mt-3 font-mono text-[12px] text-muted">
         {event.city ?? "-"} · {event.sport ?? "-"} · {formatEventDate(event.date)}
       </p>
+
+      <div className="mt-6">
+        <ZoneSlotPlacer
+          athleteId={userId}
+          frontUrl={bodyPhotos.front}
+          backUrl={bodyPhotos.back}
+          savedRects={savedRects}
+        />
+      </div>
 
       <CaptureFields
         key={capture.resetKey}
@@ -358,7 +499,7 @@ function CreateEventForm({
     (row) => row.starts_on === pickedStartsOn,
   );
 
-  const willPublish = avatarReady || Boolean(glbFile);
+  const willPublish = SHOW_3D_BODY && (avatarReady || Boolean(glbFile));
   const slugPreview = normalizeEventSlug(slug || name) || "your-event";
 
   function handleNameChange(value: string) {
@@ -467,22 +608,24 @@ function CreateEventForm({
       setErrorMessage("Leave at least one zone open.");
       return;
     }
-    if (capture.orbitError) {
+    if (SHOW_3D_BODY && capture.orbitError) {
       setErrorMessage(capture.orbitError);
       return;
     }
-    if (capture.nameClipError) {
+    if (SHOW_3D_BODY && capture.nameClipError) {
       setErrorMessage(capture.nameClipError);
       return;
     }
-    if ((capture.orbitFiles.length > 0 || capture.nameClip) && !modelPaid) {
+    if (SHOW_3D_BODY && (capture.orbitFiles.length > 0 || capture.nameClip) && !modelPaid) {
       setErrorMessage("Pay $50 for the 3D model first.");
       return;
     }
-    const captureReason = await captureFilesError(
-      capture.orbitFiles,
-      capture.nameClip,
-    );
+    const captureReason = SHOW_3D_BODY
+      ? await captureFilesError(
+          capture.orbitFiles,
+          capture.nameClip,
+        )
+      : "";
     if (captureReason) {
       setErrorMessage(captureReason);
       return;
@@ -490,13 +633,13 @@ function CreateEventForm({
 
     setBusy(true);
     try {
-      if (capture.orbitFiles.length > 0 && capture.nameClip) {
+      if (SHOW_3D_BODY && capture.orbitFiles.length > 0 && capture.nameClip) {
         await uploadCapture(userId, capture.orbitFiles, capture.nameClip);
         captureEvent("orbit_clip_uploaded");
         captureEvent("profile_clip_uploaded");
         onScanUploaded();
       }
-      if (glbFile) {
+      if (SHOW_3D_BODY && glbFile) {
         await uploadGlb(userId, glbFile);
       }
       const response = await fetch("/api/events", {
@@ -775,28 +918,36 @@ function CreateEventForm({
           </p>
         </fieldset>
 
-        <CaptureFields
-          scanUploaded={false}
-          modelPaid={modelPaid}
-          onModelPaid={onModelPaid}
-          orbitError={capture.orbitError}
-          nameClipError={capture.nameClipError}
-          onOrbitChange={capture.setOrbitFiles}
-          onNameClipChange={capture.setNameClip}
-        />
-        <GlbFileField
-          label="3D body file, optional"
-          onChange={setGlbFile}
-        />
-        <p className="mt-2 text-[13px] text-muted">
-          {avatarReady
-            ? `A body file is already marked ready. Saving will publish the event page.`
-            : "Videos do not publish the listing. We need the finished 3D body. Until then this is not public."}
-        </p>
+        {SHOW_3D_BODY ? (
+          <>
+            <CaptureFields
+              scanUploaded={false}
+              modelPaid={modelPaid}
+              onModelPaid={onModelPaid}
+              orbitError={capture.orbitError}
+              nameClipError={capture.nameClipError}
+              onOrbitChange={capture.setOrbitFiles}
+              onNameClipChange={capture.setNameClip}
+            />
+            <GlbFileField
+              label="3D body file, optional"
+              onChange={setGlbFile}
+            />
+            <p className="mt-2 text-[13px] text-muted">
+              {avatarReady
+                ? `A body file is already marked ready. Saving will publish the event page.`
+                : "Videos do not publish the listing. We need the finished 3D body. Until then this is not public."}
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-[13px] text-muted">
+            After you save, upload a front and back photo and draw the slots.
+          </p>
+        )}
 
         {errorMessage ? <p className="mt-4 text-[13px] text-danger">{errorMessage}</p> : null}
         <button type="submit" disabled={busy} className="btn btn-solid mt-6">
-          {busy ? "Saving…" : willPublish ? "Publish event" : "Save — not public yet"}
+          {busy ? "Saving…" : willPublish ? "Publish event" : "Save event"}
         </button>
         <Link href="/me" className="btn btn-ghost mt-3">
           Skip

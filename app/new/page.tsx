@@ -11,6 +11,7 @@ import {
 } from "@/lib/config";
 import { loadCaptureState } from "@/lib/capture-state";
 import {
+  athletePublishReady,
   demoteLiveWithoutReadyGlb,
   isReadyAvatar,
 } from "@/lib/event-create";
@@ -21,6 +22,10 @@ import {
 } from "@/lib/official-events";
 import { ProductShell } from "@/components/product/ProductShell";
 import NewEventForm, { type ListedEvent } from "./NewEventForm";
+import { loadAthleteZoneRects } from "@/lib/athlete-zone-rects";
+import {
+  loadBodyPhotos,
+} from "@/lib/body-photos";
 
 export const metadata: Metadata = {
   title: "New event",
@@ -78,9 +83,12 @@ export default async function NewEventPage({
     scanUploaded = captureState.scanUploaded;
     modelPaid = captureState.modelPaid;
 
-    if (existing?.status === "live" && !avatarReady) {
-      await demoteLiveWithoutReadyGlb(supabase, user.id);
-      existing = { ...existing, status: "draft" };
+    if (existing?.status === "live") {
+      const publishReady = await athletePublishReady(supabase, user.id);
+      if (!publishReady) {
+        await demoteLiveWithoutReadyGlb(supabase, user.id);
+        existing = { ...existing, status: "draft" };
+      }
     }
   }
 
@@ -89,19 +97,24 @@ export default async function NewEventPage({
     profile.sport,
   );
 
+  const bodyPhotos = await loadBodyPhotos(user.id);
+  const savedRects = supabase
+    ? await loadAthleteZoneRects(supabase, user.id)
+    : {};
+
   const heading =
     existing?.status === "live"
-      ? "Event is public"
+      ? "Edit photos & slots"
       : existing?.status === "draft"
-        ? "Scan your body"
+        ? "Place your slots"
         : "List a race";
 
   const lead =
     existing?.status === "live"
-      ? "One event at a time. Brands bid on the twelve body slots."
+      ? "Adjust available placements on your approved photos. Placements with bids stay locked."
       : existing?.status === "draft"
-        ? "Scan your body. Until the 3D body is ready, this listing is not public."
-        : "Pick an official race for your sport, or type a custom name. Date (4 days to 12 months out), country, city, event link, likeness. Twelve slots start open. You can close any of them.";
+        ? "Finish your photos and introduction video in your profile, then position the placements you want to offer."
+        : "Choose your race and add its details. Your photos, video and sponsorship placements are managed from your athlete profile.";
 
   return (
     <ProductShell email={user.email} role={profile.role}>
@@ -121,6 +134,8 @@ export default async function NewEventPage({
           profileSportDetail={profile.sport_detail}
           officialEvents={officialEvents}
           prefillRace={officialEventByStartsOn(raceKey)}
+          bodyPhotos={bodyPhotos}
+          savedRects={savedRects}
         />
       </div>
     </ProductShell>

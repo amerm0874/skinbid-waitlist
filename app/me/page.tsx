@@ -23,7 +23,12 @@ import { formatEventDate, NO_OG_METADATA } from "@/lib/seo";
 import { AvatarUpload } from "@/components/product/AvatarUpload";
 import { LiveSlotCard } from "@/components/product/LiveSlotCard";
 import { ProductShell } from "@/components/product/ProductShell";
+import { AccountGuide } from "@/components/product/AccountGuide";
+import { AthleteMediaSetup } from "@/components/product/AthleteMediaSetup";
+import { mediaView } from "@/lib/athlete-media";
+import type { AthleteMediaView } from "@/lib/athlete-media-types";
 import { RaceCard } from "@/components/product/RaceCard";
+import { ZoneSlotPlacer } from "@/components/product/ZoneSlotPlacer";
 import {
   MeZoneBoard,
   type OwnerZone,
@@ -36,6 +41,12 @@ import {
 } from "@/lib/types";
 import { isZoneName, ZONE_LABEL, ZONE_NAMES, type ZoneName } from "@/lib/zones";
 import { CancelEventButton } from "./CancelEventButton";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
+import { loadAthleteZoneRects, type AthleteZoneRects } from "@/lib/athlete-zone-rects";
+import {
+  loadBodyPhotos,
+  type BodyPhotos,
+} from "@/lib/body-photos";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { profile } = await getSessionUser();
@@ -353,16 +364,21 @@ export default async function MePage() {
   }
 
   const isAthlete = profile.role === "athlete";
+  const media = isAthlete ? await mediaView(user.id) : null;
   let athleteEvents: AthleteEvent[] = [];
   let brandBids: BrandBid[] = [];
   let suggestedRaces: OfficialEvent[] = [];
   let liveCards: LiveSlotCardRow[] = [];
+  let bodyPhotos: BodyPhotos = { front: null, back: null };
+  let savedRects: AthleteZoneRects = {};
 
   if (supabase && isAthlete) {
     athleteEvents = await loadAthleteEvents(supabase, user.id);
     if (athleteEvents.length === 0) {
       suggestedRaces = await suggestedRacesForSport(supabase, profile.sport);
     }
+    bodyPhotos = await loadBodyPhotos(user.id);
+    savedRects = await loadAthleteZoneRects(supabase, user.id);
   } else if (supabase) {
     brandBids = await loadBrandBids(supabase, user.id);
     if (brandBids.length === 0) {
@@ -377,13 +393,17 @@ export default async function MePage() {
 
   return (
     <ProductShell email={user.email} role={profile.role}>
+      <div id="account-activity">
       {isAthlete ? (
         <AthleteMe
           events={athleteEvents}
           races={suggestedRaces}
           userId={user.id}
           name={profile.name ?? ""}
-          photoUrl={profile.photo_url ?? null}
+          photoUrl={profile.photo_url || bodyPhotos.front}
+          bodyPhotos={bodyPhotos}
+          savedRects={savedRects}
+          media={media!}
         />
       ) : (
         <BrandMe
@@ -395,6 +415,7 @@ export default async function MePage() {
           logoUrl={profile.logo_url ?? null}
         />
       )}
+      </div>
     </ProductShell>
   );
 }
@@ -405,22 +426,28 @@ function AthleteMe({
   userId,
   name,
   photoUrl,
+  bodyPhotos,
+  savedRects,
+  media,
 }: {
   events: AthleteEvent[];
   races: OfficialEvent[];
   userId: string;
   name: string;
   photoUrl: string | null;
+  bodyPhotos: BodyPhotos;
+  savedRects: AthleteZoneRects;
+  media: AthleteMediaView;
 }) {
   const canList = !events.some(
     (event) => event.status === "draft" || event.status === "live",
   );
   return (
     <div className="page-stack">
-      <div className="page-head-split">
+      <div className="page-head-split profile-welcome">
         <div className="me-identity">
           <AvatarUpload userId={userId} name={name} initialUrl={photoUrl} />
-          <h1 className="slot-board-kicker">Your bib</h1>
+          <div><h1>{name || "Your athlete profile"}</h1><p>{events.some((event) => event.status === "live") ? "Your race is live. Manage your photos, placements and sponsors here." : "A few steps to your first sponsorship."}</p></div>
         </div>
         {events.length > 0 && canList ? (
           <Link href="/new" className="cta-press page-head-btn">
@@ -430,13 +457,20 @@ function AthleteMe({
         ) : null}
       </div>
 
+      <AccountGuide role="athlete" />
+      <AthleteMediaSetup initial={media} />
+      <ZoneSlotPlacer key={`${bodyPhotos.front}:${bodyPhotos.back}`} athleteId={userId} frontUrl={bodyPhotos.front} backUrl={bodyPhotos.back} savedRects={savedRects} canUpload={false} />
+
       {events.length > 0 ? (
         events.map((event) => (
-          <AthleteEventCard key={event.id} event={event} />
+          <AthleteEventCard
+            key={event.id}
+            event={event}
+          />
         ))
       ) : (
         <>
-          <p className="text-[14px] text-muted">No race yet.</p>
+          <p className="text-[14px] text-muted">Your photos and placements stay with your profile. Choose a race when you’re ready to take bids.</p>
           <Link href="/new" className="cta-press">
             <span className="cta-press-plate" aria-hidden="true" />
             <span className="cta-press-face">List a race</span>
@@ -469,7 +503,11 @@ function SuggestedRaces({ races }: { races: OfficialEvent[] }) {
   );
 }
 
-function AthleteEventCard({ event }: { event: AthleteEvent }) {
+function AthleteEventCard({
+  event,
+}: {
+  event: AthleteEvent;
+}) {
   const status = athleteEventLine(event);
   const canCancel =
     (event.status === "draft" || event.status === "live") &&
@@ -477,19 +515,25 @@ function AthleteEventCard({ event }: { event: AthleteEvent }) {
 
   return (
     <>
-      <div className="bib max-w-lg p-5">
+      <div className="me-race-card">
         <h2 className="bib-title">{event.name}</h2>
         <p className="bib-meta">{formatEventDate(event.date)}</p>
         <p className="bib-place">
           {event.city ?? "-"} · {event.sport ?? "-"}
         </p>
         <p className="page-lead">{status.line}</p>
-        {status.action || canCancel ? (
+        {status.action || canCancel || !SHOW_3D_BODY ? (
           <div className="me-actions">
             {status.action ? (
               <Link href={status.action.href} className="cta-press">
                 <span className="cta-press-plate" aria-hidden="true" />
                 <span className="cta-press-face">{status.action.label}</span>
+              </Link>
+            ) : null}
+            {!SHOW_3D_BODY ? (
+              <Link href="#placements" className="btn btn-ghost">
+                <span className="cta-press-plate" aria-hidden="true" />
+                <span>Edit placements</span>
               </Link>
             ) : null}
             {canCancel ? <CancelEventButton eventId={event.id} /> : null}
@@ -529,13 +573,14 @@ function BrandMe({
         />
         <h1 className="slot-board-kicker">Your bids</h1>
       </div>
+      <AccountGuide role="brand" />
 
       {bids.length === 0 ? (
         <>
           <p className="text-[14px] text-muted">No bids yet.</p>
           <Link href="/events" className="cta-press">
             <span className="cta-press-plate" aria-hidden="true" />
-            <span className="cta-press-face">Browse live athletes</span>
+            <span className="cta-press-face">Explore races</span>
           </Link>
           {live.length > 0 ? (
             <ul className="live-body-list">

@@ -32,6 +32,11 @@ export default async function AthletesPage() {
   return (
     <ProductShell email={user?.email} role={profile?.role}>
       <div className="page-stack">
+        <div className="board-intro">
+          <h1 className="page-title">Meet your next athlete.</h1>
+          <p className="page-lead">Real competitors. Real race-day visibility. Find the person behind your next sponsorship.</p>
+        </div>
+        <div className="collection-heading"><h2>Open for sponsorship</h2><span>{athletes.length} {athletes.length === 1 ? "athlete" : "athletes"}</span></div>
         {athletes.length > 0 ? (
           <ul className="live-body-list">
             {athletes.map((card, index) => (
@@ -43,8 +48,8 @@ export default async function AthletesPage() {
         ) : (
           <EmptyState
             line="No athletes listed yet."
-            href={profile?.role === "athlete" ? "/new" : "/signup?role=athlete"}
-            linkLabel="Be first"
+            href={profile?.role === "athlete" ? "/new" : "/e/demo"}
+            linkLabel={profile?.role === "athlete" ? "List your race" : "Explore the demo"}
           />
         )}
       </div>

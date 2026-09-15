@@ -1,10 +1,20 @@
 import { PHOTOS_BUCKET } from "@/lib/photo";
 import { createAdminSupabase } from "@/lib/supabase/admin";
+import { loadAthleteMedia, signMedia } from "@/lib/athlete-media";
 
 export type BodyPhotos = {
   front: string | null;
   back: string | null;
 };
+
+// One source of truth for /e/mohamed-test (and demo): public/body, not the
+// photos bucket. Cache-bust so old 3D plates are not reused.
+export const PUBLIC_BODY_PHOTOS: BodyPhotos = {
+  front: "/body/front.jpg?v=athlete",
+  back: "/body/back.jpg?v=athlete",
+};
+
+export const PUBLIC_BODY_SLUGS = new Set(["mohamed-test"]);
 
 const SIDES = ["front", "back"] as const;
 type Side = (typeof SIDES)[number];
@@ -21,8 +31,14 @@ export async function loadBodyPhotos(
     return empty;
   }
 
+  const media = await loadAthleteMedia(id);
+  if (media?.approved_front && media.approved_back) {
+    const [front, back] = await Promise.all([signMedia(media.approved_front), signMedia(media.approved_back)]);
+    return { front, back };
+  }
   const listed = await admin.storage.from(PHOTOS_BUCKET).list(id, { limit: 50 });
-  const files = listed.data ?? [];
+  // A replacement can have a different extension. Always use the newest upload.
+  const files = [...(listed.data ?? [])].sort((a, b) => (Date.parse(b.updated_at ?? "") || 0) - (Date.parse(a.updated_at ?? "") || 0));
   const out: BodyPhotos = { front: null, back: null };
 
   for (const side of SIDES) {

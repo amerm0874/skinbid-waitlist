@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { displayAge, FLOOR_CENTS, isAthleteSport } from "@/lib/config";
 import { DEMO_SLUG } from "@/lib/demo-event";
-import { isReadyAvatar } from "@/lib/event-create";
+import { athleteHasPublishPhotos, athleteIdsWithBodyPhotos, eventPageReady, isReadyAvatar } from "@/lib/event-create";
 import { athleteMatchesHandle, publicAthleteHandle } from "@/lib/handle";
 import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { raceForListing } from "@/lib/live-listings";
@@ -13,8 +13,12 @@ import {
   isPublishedEventStatus,
   PUBLISHED_EVENT_STATUSES,
 } from "@/lib/types";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
+import { PUBLIC_BODY_SLUGS } from "@/lib/body-photos";
 import { loadLeadCentsByZone } from "@/lib/zone-bids";
 import { featuredSlot, openZoneLabels } from "@/lib/zones";
+import { loadAthleteZoneRects } from "@/lib/athlete-zone-rects";
+import { drawnPhotoZones } from "@/lib/zone-photos";
 
 // Drafts and cancelled stay private. Sitemap and public pages only see these.
 const PUBLISHED_STATUSES = PUBLISHED_EVENT_STATUSES;
@@ -85,13 +89,6 @@ async function loadReadyAvatar(
     .eq("athlete_id", athleteId)
     .maybeSingle();
   return isReadyAvatar(data) ? data : null;
-}
-
-async function athleteHasReadyGlb(
-  db: NonNullable<ReturnType<typeof publicDb>>,
-  athleteId: string,
-) {
-  return Boolean(await loadReadyAvatar(db, athleteId));
 }
 
 async function loadAthleteRace(
@@ -205,6 +202,8 @@ export const loadAthleteByHandle = cache(async (rawHandle: string) => {
   }
 
   const avatar = await loadReadyAvatar(db, profile.id);
+  const photoReady =
+    !SHOW_3D_BODY && (await athleteHasPublishPhotos(profile.id));
   const { data: events } = await db
     .from("events")
     .select("name, date, slug, city, sport, status, zones(id, name, status)")
@@ -212,10 +211,16 @@ export const loadAthleteByHandle = cache(async (rawHandle: string) => {
     .in("status", [...PUBLISHED_STATUSES])
     .order("date", { ascending: false });
 
-  // No real scan → treat as no live listing on the public page.
-  const published = avatar ? (events ?? []) : [];
+  // No photos (and no real scan) → treat as no live listing on the public page.
+  const published = avatar || photoReady ? (events ?? []) : [];
   const live = published.find((event) => event.status === "live") ?? null;
-  const liveZones = (live?.zones ?? []) as ZoneStatusRow[];
+  const savedRects = !SHOW_3D_BODY && live ? await loadAthleteZoneRects(db, profile.id) : null;
+  const savedOnly = true;
+  const visibleZones = new Set<string>([
+    ...drawnPhotoZones("front", { saved: savedRects, savedOnly }),
+    ...drawnPhotoZones("back", { saved: savedRects, savedOnly }),
+  ]);
+  const liveZones = ((live?.zones ?? []) as ZoneStatusRow[]).filter((zone) => SHOW_3D_BODY || visibleZones.has(zone.name ?? ""));
   const leads = live
     ? await loadLeadCentsByZone(
         db,
@@ -298,13 +303,21 @@ export async function listPublishedEventSlugs() {
   const rows = (data ?? []).filter(
     (row) => row.slug !== DEMO_SLUG && isPublishedEventStatus(row.status),
   );
-  const ready = await readyAthleteIds(
+  const glbReady = await readyAthleteIds(
     db,
     rows.map((row) => row.athlete_id),
   );
+  const photoReady = SHOW_3D_BODY
+    ? new Set<string>()
+    : await athleteIdsWithBodyPhotos(rows.map((row) => row.athlete_id));
 
   return rows
-    .filter((row) => ready.has(row.athlete_id))
+    .filter(
+      (row) =>
+        glbReady.has(row.athlete_id) ||
+        photoReady.has(row.athlete_id) ||
+        PUBLIC_BODY_SLUGS.has(row.slug),
+    )
     .map((row) => ({ slug: row.slug, date: row.date }));
 }
 
@@ -321,7 +334,11 @@ export const loadEventSeo = cache(async (slug: string): Promise<PublicEventSeo |
       event &&
       isPublishedEventStatus(event.status) &&
       event.slug !== DEMO_SLUG &&
-      (await athleteHasReadyGlb(db, event.athlete_id))
+      (await eventPageReady({
+        slug: event.slug,
+        athleteId: event.athlete_id,
+        avatar: await loadReadyAvatar(db, event.athlete_id),
+      }))
     ) {
       const { data: athlete } = await db
         .from("profiles")

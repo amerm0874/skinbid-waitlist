@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { AdvertiseBrandButton } from "@/components/product/AdvertiseBrandButton";
+import Link from "next/link";
 import { EmptyState } from "@/components/product/EmptyState";
 import { EventMeet } from "@/components/product/RaceMeet";
 import { LiveSlotCard } from "@/components/product/LiveSlotCard";
@@ -106,17 +106,12 @@ export default async function RacePage({ params }: PageProps) {
     notFound();
   }
 
-  const advertiseSlug =
-    participating.length === 1 ? participating[0]?.slug : null;
-
   return (
     <ProductShell email={user?.email} role={profile?.role}>
       <div className="page-stack">
-        <EventMeet name={name} sport={sport} city={city} date={date} />
-
-        {advertiseSlug ? (
-          <AdvertiseBrandButton slug={advertiseSlug} />
-        ) : null}
+        <nav className="studio-breadcrumb" aria-label="Breadcrumb"><Link href="/events">Events</Link><span aria-hidden="true">/</span><span>{name}</span></nav>
+        <EventMeet name={name} sport={sport} city={city} date={date} showAuction={participating.length > 0} />
+        <div className="collection-heading"><h2>Choose your athlete</h2><span>{participating.length} open for sponsorship</span></div>
 
         {participating.length > 0 ? (
           <ul className="live-body-list">
@@ -131,7 +126,7 @@ export default async function RacePage({ params }: PageProps) {
             line="No athletes on this race yet."
             toEvents={isAthlete}
             href={listHref ?? "/events"}
-            linkLabel="Be first"
+            linkLabel={isAthlete ? "List your race" : "Explore other races"}
           />
         )}
       </div>

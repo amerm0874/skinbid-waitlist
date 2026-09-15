@@ -1,6 +1,8 @@
 import { eventDateWindowError, eventSlugError, normalizeEventSlug } from "@/lib/auction";
+import { loadBodyPhotos, PUBLIC_BODY_SLUGS } from "@/lib/body-photos";
 import { parseAthleteSport } from "@/lib/config";
 import { isCountry } from "@/lib/countries";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
 import { parseMarkOffer } from "@/lib/logo";
 import { ZONE_NAMES, isZoneName } from "@/lib/zones";
 import type { createServerSupabase } from "@/lib/supabase/server";
@@ -56,6 +58,50 @@ export async function athleteAvatarReady(supabase: Db, userId: string) {
   return isReadyAvatar(data);
 }
 
+export async function athleteHasPublishPhotos(athleteId: string) {
+  const photos = await loadBodyPhotos(athleteId);
+  return Boolean(photos.front && photos.back);
+}
+
+export async function athleteIdsWithBodyPhotos(athleteIds: string[]) {
+  const unique = [...new Set(athleteIds.filter(Boolean))];
+  const ready = new Set<string>();
+  await Promise.all(
+    unique.map(async (id) => {
+      if (await athleteHasPublishPhotos(id)) {
+        ready.add(id);
+      }
+    }),
+  );
+  return ready;
+}
+
+// Photo stage (SHOW_3D_BODY = false): front + back photos publish the race.
+// 3D stage: a real GLB still publishes, same as before.
+export async function athletePublishReady(supabase: Db, userId: string) {
+  if (SHOW_3D_BODY) {
+    return athleteAvatarReady(supabase, userId);
+  }
+  return athleteHasPublishPhotos(userId);
+}
+
+export async function eventPageReady(input: {
+  slug: string;
+  athleteId: string;
+  avatar?: AvatarFields | null;
+}) {
+  if (SHOW_3D_BODY) {
+    return isReadyAvatar(input.avatar);
+  }
+  if (PUBLIC_BODY_SLUGS.has(input.slug)) {
+    return true;
+  }
+  if (await athleteHasPublishPhotos(input.athleteId)) {
+    return true;
+  }
+  return isReadyAvatar(input.avatar);
+}
+
 export async function readyAthleteIdSet(supabase: Db, athleteIds: string[]) {
   const unique = [...new Set(athleteIds.filter(Boolean))];
   if (unique.length === 0) {
@@ -72,9 +118,9 @@ export async function readyAthleteIdSet(supabase: Db, athleteIds: string[]) {
   );
 }
 
-// Live without a scan is a bug. Pull it back to draft.
+// Live without a stage (photos, or a real GLB when 3D is on) is a bug.
 export async function demoteLiveWithoutReadyGlb(supabase: Db, userId: string) {
-  const ready = await athleteAvatarReady(supabase, userId);
+  const ready = await athletePublishReady(supabase, userId);
   if (ready) {
     return false;
   }
@@ -197,6 +243,20 @@ export async function ensureEventZoneRows(db: Db, eventId: string) {
   const { error } = await db.from("zones").insert(missing);
   if (error) {
     console.log("ensureEventZoneRows", eventId, error.message);
+  }
+}
+
+const HIDDEN_EVENT_ZONES = ["shoulder_l", "shoulder_r"] as const;
+
+// Closed and not drawn on the photo stage. Zone ids stay in the table.
+export async function closeHiddenPhotoZones(db: Db, eventId: string) {
+  const { error } = await db
+    .from("zones")
+    .update({ status: "closed" })
+    .eq("event_id", eventId)
+    .in("name", [...HIDDEN_EVENT_ZONES]);
+  if (error) {
+    console.log("closeHiddenPhotoZones", eventId, error.message);
   }
 }
 

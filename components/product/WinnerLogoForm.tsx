@@ -42,8 +42,8 @@ export function WinnerLogoForm({
   return (
     <div className="logo-desk">
       <p className="page-lead">
-        {athleteName} · {eventName}. Transparent PNG. Outbid refunds it. Winner
-        prints.
+        {athleteName} · {eventName}. Add a transparent PNG. It appears on the
+        body now; the winning asset is used on race day.
       </p>
       {isDemo ? (
         <p className="fine">Demo desk. Files land in the logos bucket.</p>

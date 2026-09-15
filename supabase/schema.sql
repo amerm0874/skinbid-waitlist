@@ -479,6 +479,37 @@ create table if not exists public.zones (
 
 alter table public.zones enable row level security;
 
+-- Athlete-drawn photo slot boxes. Brand event pages read these; brands cannot write.
+create table if not exists public.athlete_zone_rects (
+  athlete_id uuid not null references public.profiles (id) on delete cascade,
+  zone_name text not null check (zone_name in (
+    'chest_l','chest_r','abs','shoulder_l','shoulder_r',
+    'bicep_l','bicep_r','forearm_l','forearm_r',
+    'back_l','back_r','thigh_l','thigh_r'
+  )),
+  x numeric not null,
+  y numeric not null,
+  w numeric not null,
+  h numeric not null,
+  primary key (athlete_id, zone_name)
+);
+
+alter table public.athlete_zone_rects enable row level security;
+
+drop policy if exists "athlete_zone_rects_select" on public.athlete_zone_rects;
+create policy "athlete_zone_rects_select"
+  on public.athlete_zone_rects for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "athlete_zone_rects_write_own" on public.athlete_zone_rects;
+create policy "athlete_zone_rects_write_own"
+  on public.athlete_zone_rects for all
+  to authenticated
+  using (athlete_id = auth.uid())
+  with check (athlete_id = auth.uid());
+
+
 drop policy if exists "zones_select" on public.zones;
 create policy "zones_select"
   on public.zones for select

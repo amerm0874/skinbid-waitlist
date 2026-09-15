@@ -3,7 +3,7 @@ import { closeEventAuction } from "@/lib/close-auctions";
 import { holdPaidPendingBids } from "@/lib/hold-bid";
 import { isMissingColumn } from "@/lib/db-error";
 import { DEMO_EVENT, DEMO_SLUG } from "@/lib/demo-event";
-import { isReadyAvatar } from "@/lib/event-create";
+import { eventPageReady } from "@/lib/event-create";
 import {
   demoLogoStoragePath,
   LOGOS_BUCKET,
@@ -134,7 +134,7 @@ export async function loadLogoDesk(input: {
     .select("glb_url, ready")
     .eq("athlete_id", event.athlete_id)
     .maybeSingle();
-  if (!isReadyAvatar(avatar)) {
+  if (!(await eventPageReady({ slug: event.slug, athleteId: event.athlete_id, avatar }))) {
     return null;
   }
 

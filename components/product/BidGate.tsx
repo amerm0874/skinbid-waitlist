@@ -5,9 +5,9 @@ import Link from "next/link";
 export function BidGate() {
   return (
     <div className="bid-gate">
-      <h2 className="bid-gate-title display">Demo — bidding is not open.</h2>
+      <h2 className="bid-gate-title">You’re exploring the demo</h2>
       <p className="bid-gate-sub">
-        This page does not take bids. Live events take Bid $100.
+        Try the placements here. To place a bid, choose an athlete in a live event.
       </p>
       <Link href="/events" className="cta-press cta-press-full bid-gate-cta">
         <span className="cta-press-plate" aria-hidden="true" />

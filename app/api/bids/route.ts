@@ -9,7 +9,7 @@ import {
   canAdvertiseOnEvent,
 } from "@/lib/config";
 import { DEMO_SLUG } from "@/lib/demo-event";
-import { athleteAvatarReady, isReadyAvatar } from "@/lib/event-create";
+import { eventPageReady } from "@/lib/event-create";
 import { logoDeskPath } from "@/lib/logo";
 import { isPublishedEventStatus } from "@/lib/types";
 import { holdPaidPendingBids } from "@/lib/hold-bid";
@@ -27,6 +27,9 @@ import { takeToken } from "@/lib/rate-limit";
 import { createAdminSupabase, createPublicSupabase } from "@/lib/supabase/admin";
 import { isPersistedZoneId, loadLastZoneBids } from "@/lib/zone-bids";
 import { isZoneName } from "@/lib/zones";
+import { loadAthleteZoneRects } from "@/lib/athlete-zone-rects";
+import { isHiddenPhotoZone } from "@/lib/zone-photos";
+import { SHOW_3D_BODY } from "@/lib/feature-flags";
 
 type Body = {
   slug?: string;
@@ -62,7 +65,13 @@ export async function GET(request: Request) {
     .select("glb_url, ready")
     .eq("athlete_id", event.athlete_id)
     .maybeSingle();
-  if (!isReadyAvatar(avatar)) {
+  if (
+    !(await eventPageReady({
+      slug,
+      athleteId: event.athlete_id,
+      avatar,
+    }))
+  ) {
     return NextResponse.json({ bids: [] });
   }
 
@@ -145,8 +154,18 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-  const glbReady = await athleteAvatarReady(supabase, event.athlete_id);
-  if (!glbReady) {
+  const { data: avatar } = await supabase
+    .from("avatars")
+    .select("glb_url, ready")
+    .eq("athlete_id", event.athlete_id)
+    .maybeSingle();
+  if (
+    !(await eventPageReady({
+      slug: event.slug,
+      athleteId: event.athlete_id,
+      avatar,
+    }))
+  ) {
     return NextResponse.json({ error: "Event is not live." }, { status: 400 });
   }
   // Close bidding when now > event_start - 48 hours.
@@ -171,6 +190,16 @@ export async function POST(request: Request) {
   const { data: zone } = await zoneQuery.maybeSingle();
   if (!zone || zone.status !== "open") {
     return NextResponse.json({ error: "Zone is closed." }, { status: 400 });
+  }
+
+  if (!isZoneName(zone.name) || isHiddenPhotoZone(zone.name)) {
+    return NextResponse.json({ error: "This placement is not available." }, { status: 400 });
+  }
+  if (!SHOW_3D_BODY) {
+    const placements = await loadAthleteZoneRects(admin, event.athlete_id);
+    if (!placements[zone.name]) {
+      return NextResponse.json({ error: "The athlete has not positioned this placement yet." }, { status: 409 });
+    }
   }
 
   await holdPaidPendingBids([zone.id]);

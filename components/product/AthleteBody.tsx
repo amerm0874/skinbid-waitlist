@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { isReadyAvatar } from "@/lib/event-create";
+import { isReadyAvatar } from "@/lib/avatar-readiness";
 
 const EventCage = dynamic(() => import("@/components/cage/EventCage"), {
   ssr: false,

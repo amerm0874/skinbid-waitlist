@@ -10,20 +10,30 @@ export function RaceListRow({
   name,
   city,
   date,
+  athleteCount,
 }: {
   href: string;
   name: string;
   city: string | null;
   date: string;
+  athleteCount: number;
 }) {
   return (
     <EventLink href={href} className="race-meet-row">
+      <div className="race-date-tile" aria-hidden="true">
+        <span>{new Date(date).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })}</span>
+        <strong>{new Date(date).getUTCDate()}</strong>
+      </div>
       <div className="race-meet-row-copy">
         <p className="race-meet-row-name">{name}</p>
         {city ? <p className="race-meet-row-city">{city}</p> : null}
         <p className="race-meet-row-date">{formatRaceDay(date)}</p>
+        <p className="race-meet-row-inventory">
+          {athleteCount} {athleteCount === 1 ? "athlete" : "athletes"} to sponsor
+        </p>
       </div>
       <AuctionClock eventDate={raceClockDate(date)} />
+      <span className="race-open-label">Explore race <span aria-hidden="true">↗</span></span>
     </EventLink>
   );
 }
@@ -33,11 +43,13 @@ export function EventMeet({
   sport,
   city,
   date,
+  showAuction = true,
 }: {
   name: string;
   sport: string | null;
   city: string | null;
   date: string;
+  showAuction?: boolean;
 }) {
   const bits = [sport, city, formatRaceDay(date)].filter(Boolean);
   return (
@@ -48,7 +60,7 @@ export function EventMeet({
           <p className="event-meet-meta">{bits.join(" · ")}</p>
         ) : null}
       </div>
-      <AuctionClock eventDate={raceClockDate(date)} />
+      {showAuction ? <AuctionClock eventDate={raceClockDate(date)} /> : null}
     </header>
   );
 }

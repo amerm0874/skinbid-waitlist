@@ -8,6 +8,7 @@ import { centsToUsd } from "@/lib/money";
 import type { ZoneStatus } from "@/lib/types";
 import { isPersistedZoneId } from "@/lib/zone-bids";
 import { ZONE_LABEL, ZONE_NAMES, type ZoneName } from "@/lib/zones";
+import { isHiddenPhotoZone } from "@/lib/zone-photos";
 import { captureEvent } from "@/lib/analytics";
 import { zoneToggleError } from "@/lib/zone-status";
 import { DownloadLogo } from "@/components/product/DownloadLogo";
@@ -64,7 +65,7 @@ export function zoneActionLabel(input: {
   }
   return {
     disabled: false,
-    label: next === "closed" ? "Close" : "Reopen",
+    label: next === "closed" ? "Make unavailable" : "Make available",
     hint: null as string | null,
   };
 }
@@ -121,14 +122,14 @@ export function MeZoneBoard({ eventDate, zones }: BoardProps) {
   return (
     <div className="me-zones">
       <div>
-        <h2 className="bib-title">Zones</h2>
+        <h2 className="bib-title">Placement availability</h2>
         <p className="fine">
-          Close empty zones if you will not wear a mark there. Held or won stays.
-          After T–48h you cannot reopen.
+          Choose where you are willing to wear a sponsor. Paid placements stay reserved.
+          Availability locks 48 hours before race day. Only placements positioned on your photos are shown to brands.
         </p>
       </div>
       <ul className="me-zone-list">
-        {ZONE_NAMES.map((name) => {
+        {ZONE_NAMES.filter((name) => !isHiddenPhotoZone(name)).map((name) => {
           const row = zones.find((item) => item.name === name);
           if (!row) {
             return null;
