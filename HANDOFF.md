@@ -117,3 +117,76 @@ Lower risk (UI-only, you were less likely to keep editing): `EmptyState.tsx`, `E
 **Suggested merge:** keep working on `main` from `HEAD`. If you need to split: checkpoint `c9064ea` is your backend WIP; UI is the four `ui:`/`copy:` commits after it. Do not revert the checkpoint. Prefer merging UI CSS by taking **theirs+ours** on `product-studio.css` rather than dropping contrast/`live-body-slot { display: none }`.
 
 Do not `git push --force`. Do not publish events without `avatars.ready` and a real `glb_url`.
+
+---
+
+# Cursor pass 2
+
+Still on local `main`. **Not pushed.** Same forbidden-area rules. No landing/auth/API/lib-server/supabase/package.json/script edits. No save, upload, or placement geometry/behavior changes.
+
+## Commits
+
+| Hash | Description |
+|---|---|
+| `de7b3bddfb6bb9dfd3a9375ebdf95b45bc3c8ea8` | `chore: ignore local Playwright MCP screenshots` |
+| `acd082b2e415c4eef668df91333aee39cb095cdd` | `ui: match athletes page chrome to events` |
+| `61e7b5c5feb40657adf14d2e2529a980eb096899` | `copy: align held, won, and placement labels` |
+| `e0e75273c51382855f7a847ceda2bce30ace57f1` | `ui: restyle proof title and media file pickers` |
+| *(this file)* | `chore: add Cursor pass 2 notes to HANDOFF` |
+
+## Files
+
+| File | Why |
+|---|---|
+| `.gitignore` | Added `.playwright-mcp/`. Existing tracked PNGs were **not** deleted or untracked. |
+| `app/athletes/page.tsx` | Page chrome only: same `board-intro` + `discovery-guide` + `collection-heading` pattern as `/events`. `loadLiveSlotCards` untouched. |
+| `mobile/src/app/event/[slug]/index.tsx` | Pill mapping only. `leadStatus` was already `"held" \| "won"`. `"Won"` → `"Leading bid"` for held, `"Placement awarded"` for won. |
+| `app/me/page.tsx` | Presentational remap: athlete CTA label `"Event"` → `"View listing"`. Href unchanged. |
+| `components/product/EventStage.tsx` | Owner link copy: `"Edit photos & slots"` → `"Edit photos & placements"`; `"Upload proof"` → `"Upload race-day proof"`. Hrefs unchanged. |
+| `components/product/ZoneSlotPlacer.tsx` | Counter copy: `"1 placement saved"` vs `"N placements saved"`. Save/draw logic unchanged. |
+| `app/proof/[id]/ProofForm.tsx` | Labels/errors: placement photos, “correct placement”. Upload slots still `zone-1` / `zone-2` / `venue`. |
+| `app/proof/[id]/page.tsx` | Heading class `slot-board-kicker` → `page-title`. |
+| `components/product/profile-studio.css` | File-picker button look only. Upload handlers unchanged. |
+
+## Athlete browser QA
+
+Logged in on `http://localhost:3000` as **Audit Athlete Two** (`/a/auditathlete2`). Did **not** click Save, upload, Cancel, or Make unavailable.
+
+Clicked through:
+
+- `/me` — guide hrefs still `/me#athlete-media`, `/me#placements`. Media setup 0/3 (inputs disabled until consent). Placement studio 1 saved (Abs). Race “Audit Two Race” live. CTA now “View listing” → `/e/audit-two-race`.
+- `/a/auditathlete2` — Open for sponsorship, Abs, Placement from $100, “View available spots”.
+- `/e/audit-two-race` — Front/Back toggle. Abs pad on front only. Owner proof link present.
+- `/proof/2f9c34d1-f5cf-4e9b-a7ff-3a59bdd4b908` — Race-day proof form loaded for this athlete event.
+- `/athletes` — “Meet your next athlete.” + 3-step guide + portrait cards, no prices.
+
+Widths **375** and **768**: `scrollWidth - innerWidth` ≤ 0 on `/me`, `/athletes`, `/a/auditathlete2`, `/e/audit-two-race`, `/proof/[id]`.
+
+## Verify
+
+| Command | Result |
+|---|---|
+| `npx tsc --noEmit` | Exit **0**, no output. |
+| `npm run build` | Exit **0**. Next.js 16.3.4 compiled, TypeScript finished, 59/59 pages. |
+| `node scripts/check-photo-placements.cjs` | `PASS: manual coordinates, no automatic slots, front/back mapping, shoulders hidden, closed slots hidden.` |
+| `node scripts/check-launch-flows.cjs` | `PASS: media auth, role, origin, consent, missing-key, upload validation, ownership, duplicate job, two-photo preparation, partial failure, approval separation and auth callback recovery contracts. SQL assertions are static, not live migration tests.` |
+
+## Needs Codex
+
+Pass 1 items **1–6 still open** (video hide UI, proof-per-event, held vs won data, leftover 3D, demo pads vs empty rail, `media.configured`).
+
+Closed from pass 1:
+
+- Mobile `"Won"` pill — done in this pass (`leadStatus` was already on the zone).
+- `/athletes` chrome — done (presentational only).
+- `.playwright-mcp/` gitignore — added; **do not** `git rm` the already-tracked PNGs unless you want them gone.
+
+Still visual/copy debt I left for you (out of scope or lib):
+
+1. **`lib/athlete-status.ts`** still returns `"Event"` / `"Upload proof."`. `/me` remaps `"Event"` in the page. Other callers still show the terse string.
+2. **Two photo UIs on athlete `/me`.** Avatar “Change photo” at the top and `AthleteMediaSetup` (front/back/video) below. Confusing; I did not hide either.
+3. **Native file inputs** remain on media cards (disabled until consent). Styled only. A custom drop-zone would need markup around the existing `<input type="file">` — I did not wrap it.
+4. **Owner links on `/e/[slug]` are duplicated** (hud `event-hud-share` + `studio-help`). Same hrefs, same copy after this pass.
+5. **AuctionClock** on `/a/[handle]` uses NumberFlow; event page aria-label showed a real countdown. If digits ever clip on the profile clock, it is `product-studio.css` overriding `.auction-clock-n` to 20px vs `globals.css` 34px — I did not merge those.
+
+Do not push unless asked.
