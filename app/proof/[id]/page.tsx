@@ -56,7 +56,7 @@ export default async function ProofPage({
   return (
     <ProductShell email={user.email}>
       <div className="page-stack">
-        <h1 className="slot-board-kicker">Race-day proof</h1>
+        <h1 className="page-title">Race-day proof</h1>
         <ProofForm
           eventId={event.id}
           eventName={event.name}
