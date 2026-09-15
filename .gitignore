@@ -43,6 +43,9 @@ yarn-error.log*
 # waitlist signups
 /data/waitlist.json
 
+# local Playwright screenshots (tracked files already in git stay tracked)
+.playwright-mcp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
