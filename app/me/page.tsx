@@ -527,7 +527,9 @@ function AthleteEventCard({
             {status.action ? (
               <Link href={status.action.href} className="cta-press">
                 <span className="cta-press-plate" aria-hidden="true" />
-                <span className="cta-press-face">{status.action.label}</span>
+                <span className="cta-press-face">
+                  {status.action.label === "Event" ? "View listing" : status.action.label}
+                </span>
               </Link>
             ) : null}
             {!SHOW_3D_BODY ? (

@@ -82,11 +82,12 @@ export function ZoneSlotPlacer({ athleteId, frontUrl, backUrl, savedRects, canUp
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save this placement."); }
     finally { setBusy(false); }
   }
+  const savedCount = names.filter((name) => rects[name]).length;
   return (
     <section className="placement-studio" id="placements" aria-labelledby="placement-title">
       <header className="profile-section-heading">
         <div><h2 id="placement-title">Your body. Your placements.</h2><p>Choose a placement, then draw it on your photo. Nothing is positioned for you.</p></div>
-        <span className="setup-count">{names.filter((name) => rects[name]).length} placements saved</span>
+        <span className="setup-count">{savedCount === 1 ? "1 placement saved" : `${savedCount} placements saved`}</span>
       </header>
       <div className="placement-workspace">
         <div className="placement-pair">

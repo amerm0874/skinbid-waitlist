@@ -99,12 +99,12 @@ export default function ProofForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const zoneOneError = photoError(zoneOne, "zone photo 1");
+    const zoneOneError = photoError(zoneOne, "placement photo 1");
     if (zoneOneError) {
       setErrorMessage(zoneOneError);
       return;
     }
-    const zoneTwoError = photoError(zoneTwo, "zone photo 2");
+    const zoneTwoError = photoError(zoneTwo, "placement photo 2");
     if (zoneTwoError) {
       setErrorMessage(zoneTwoError);
       return;
@@ -121,7 +121,7 @@ export default function ProofForm({
       return;
     }
     if (!zoneOne || !zoneTwo || !venue) {
-      setErrorMessage("Upload 2 zone photos and 1 venue photo.");
+      setErrorMessage("Upload 2 placement photos and 1 venue photo.");
       return;
     }
 
@@ -187,12 +187,12 @@ export default function ProofForm({
     <div className="bib proof-ticket max-w-lg">
       <p className="proof-ticket-zone">{eventName}</p>
       <p className="page-lead">
-        Two photos of the logo on the right placement. Your face or bib must be
-        visible. One photo at the venue. A post URL is optional.
+        Two photos of the logo on the correct placement. Your face or bib must
+        be visible. One photo at the venue. A post URL is optional.
       </p>
       <form onSubmit={handleSubmit} className="proof-ticket-form">
         <label className="block">
-          <span className="field-label">Zone photo 1</span>
+          <span className="field-label">Placement photo 1</span>
           <input
             className="field pt-2 text-[13px]"
             type="file"
@@ -203,7 +203,7 @@ export default function ProofForm({
           />
         </label>
         <label className="mt-4 block">
-          <span className="field-label">Zone photo 2</span>
+          <span className="field-label">Placement photo 2</span>
           <input
             className="field pt-2 text-[13px]"
             type="file"

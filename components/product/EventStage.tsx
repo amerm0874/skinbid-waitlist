@@ -595,12 +595,12 @@ export default function EventStage({
       {ownerBlock}
       {isOwner && !isDemo && !SHOW_3D_BODY ? (
         <a href="/new" className="text-[13px] text-accent">
-          Edit photos & slots
+          Edit photos & placements
         </a>
       ) : null}
       {isOwner && eventId ? (
         <a href={`/proof/${eventId}`} className="text-[13px] text-accent">
-          Upload proof
+          Upload race-day proof
         </a>
       ) : null}
       {isOwner && zone ? <BidLog bids={liveBids[zone.id] ?? []} /> : null}
@@ -644,7 +644,7 @@ export default function EventStage({
         />
         {isOwner && !isDemo && !SHOW_3D_BODY ? (
           <a href="/new" className="event-hud-share">
-            Edit photos & slots
+            Edit photos & placements
           </a>
         ) : null}
       </div>

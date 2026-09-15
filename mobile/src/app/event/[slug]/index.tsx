@@ -133,7 +133,11 @@ export default function EventDetailScreen() {
                     <ThemedText type="subtitle" style={{ fontFamily: Fonts?.mono }}>
                       {zone.leadCents ? centsToUsd(zone.leadCents) : "No bids yet"}
                     </ThemedText>
-                    {zone.leadStatus === "won" ? <Pill label="Won" tone="success" /> : null}
+                    {zone.leadStatus === "won" ? (
+                      <Pill label="Placement awarded" tone="success" />
+                    ) : zone.leadStatus === "held" ? (
+                      <Pill label="Leading bid" tone="accent" />
+                    ) : null}
                     <Tap
                       haptic={false}
                       onPress={() => onExpandZone(zone.id)}
