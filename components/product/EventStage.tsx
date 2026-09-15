@@ -331,7 +331,7 @@ export default function EventStage({
   });
 
   const meetRows = saleRows.map((row) => {
-    const holder = row.occupied ? row.brandLabel?.trim() || "Held" : "Open";
+    const holder = row.occupied ? row.brandLabel?.trim() || "Bid placed" : "Open";
     const logo = row.logoUrl?.trim() || null;
     return (
       <button
@@ -396,7 +396,7 @@ export default function EventStage({
 
   const holderName = zone
     ? zone.occupied
-      ? zone.brandLabel?.trim() || "Held"
+      ? zone.brandLabel?.trim() || "Bid placed"
       : zone.status === "closed"
         ? "Closed"
         : "Open"
@@ -508,7 +508,7 @@ export default function EventStage({
       <p className="event-bid-status">
         {zone?.occupied && zone.brandLabel ? (
           <>
-            {open ? "Lead" : "Won"}{" "}
+            {open ? "Leading bid" : "Highest bid"}{" "}
             {zone.logoUrl ? (
               // User PNG from the logos bucket. next/image needs a fixed host list.
               // eslint-disable-next-line @next/next/no-img-element

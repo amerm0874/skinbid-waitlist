@@ -127,7 +127,7 @@ export default function ProofForm({
 
     const supabase = createBrowserSupabase();
     if (!supabase) {
-      setErrorMessage("Auth is not configured yet.");
+      setErrorMessage("Can't upload right now. Reload and try again.");
       return;
     }
 
@@ -151,7 +151,7 @@ export default function ProofForm({
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
-        throw new Error(payload.error || "Could not save proof.");
+        throw new Error(payload.error || "Could not save your photos.");
       }
 
       console.log("Proof uploaded", eventId);
@@ -159,7 +159,7 @@ export default function ProofForm({
       setSentStatus("pending");
     } catch (error) {
       console.log("Proof upload failed", error);
-      setErrorMessage("Upload failed. Try again.");
+      setErrorMessage("Upload failed. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -172,12 +172,12 @@ export default function ProofForm({
       <div className="bib proof-ticket max-w-lg">
         <p className="proof-ticket-zone">{eventName}</p>
         <p className="proof-ticket-status">
-          {sentStatus === "pending" ? "Pending" : "Approved"}
+          {sentStatus === "pending" ? "In review" : "Approved"}
         </p>
         <p className="mt-2 text-[15px] text-muted">
           {sentStatus === "pending"
-            ? "Proof sent. We check the photos, then payout can move."
-            : "Proof sent."}
+            ? "Photos received. We’ll review them before payout."
+            : "Your race-day photos were approved."}
         </p>
       </div>
     );
@@ -187,7 +187,7 @@ export default function ProofForm({
     <div className="bib proof-ticket max-w-lg">
       <p className="proof-ticket-zone">{eventName}</p>
       <p className="page-lead">
-        Two photos of the mark on the correct zone. Face or bib must be
+        Two photos of the logo on the right placement. Your face or bib must be
         visible. One photo at the venue. A post URL is optional.
       </p>
       <form onSubmit={handleSubmit} className="proof-ticket-form">
@@ -245,7 +245,7 @@ export default function ProofForm({
         >
           <span className="cta-press-plate" aria-hidden="true" />
           <span className="cta-press-face">
-            {busy ? "Uploading…" : "Submit proof"}
+            {busy ? "Uploading…" : "Submit photos"}
           </span>
         </button>
       </form>

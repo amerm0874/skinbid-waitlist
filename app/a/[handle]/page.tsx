@@ -178,9 +178,26 @@ export default async function AthletePage({ params }: PageProps) {
           </ul>
         ) : null}
 
-        {introductionVideo ? <section className="intro-video-section"><h2>Meet {athlete.name.split(" ")[0]}</h2><video src={introductionVideo} controls playsInline preload="metadata" aria-label={`${athlete.name}'s introduction video`} /><p>An introduction uploaded by the athlete. Compare it with their photos; uploading a video does not mean Skinbid has verified their identity.</p></section> : null}
+        {introductionVideo ? (
+          <section className="intro-video-section">
+            <h2>Meet {athlete.name.split(" ")[0]}</h2>
+            <video
+              src={introductionVideo}
+              controls
+              playsInline
+              preload="metadata"
+              aria-label={`${athlete.name}'s introduction video`}
+            />
+            <p>
+              Uploaded by the athlete. Compare it with their photos. Skinbid does
+              not verify identity.
+            </p>
+          </section>
+        ) : null}
 
-        {live ? null : <EmptyState line="No live event." />}
+        {live ? null : (
+          <EmptyState line="This athlete has no race open for sponsorship." />
+        )}
         </div>
       </div>
     </ProductShell>

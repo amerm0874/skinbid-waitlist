@@ -4,7 +4,7 @@ export function EmptyState({
   line,
   toEvents = true,
   href = "/events",
-  linkLabel = "Events",
+  linkLabel = "Browse races",
 }: {
   line: string;
   toEvents?: boolean;

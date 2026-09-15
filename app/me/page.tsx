@@ -99,10 +99,10 @@ function isProofStatus(value: string | null | undefined): value is ProofStatus {
 
 function bidStatusLabel(status: BidStatus) {
   if (status === "held") {
-    return "Held";
+    return "Leading bid";
   }
   if (status === "won") {
-    return "Won";
+    return "Placement awarded";
   }
   if (status === "refunded") {
     return "Outbid";
@@ -577,7 +577,7 @@ function BrandMe({
 
       {bids.length === 0 ? (
         <>
-          <p className="text-[14px] text-muted">No bids yet.</p>
+          <p className="text-[14px] text-muted">You haven’t placed a bid yet.</p>
           <Link href="/events" className="cta-press">
             <span className="cta-press-plate" aria-hidden="true" />
             <span className="cta-press-face">Explore races</span>

@@ -54,14 +54,14 @@ export function EventsCatalog({
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
+            placeholder="Search races"
             aria-label="Search races"
             autoComplete="off"
           />
         </label>
       </div>
       {visible.length === 0 ? (
-        <p className="catalog-empty">No races match.</p>
+        <p className="catalog-empty">No races match that search.</p>
       ) : (
         <ul className="slot-board">
           {visible.map((race) => (

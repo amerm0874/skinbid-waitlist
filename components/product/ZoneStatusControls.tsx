@@ -56,10 +56,10 @@ export function zoneActionLabel(input: {
   });
   if (error) {
     if (input.occupied && input.leadStatus === "won") {
-      return { disabled: true, label: "Won", hint: error };
+      return { disabled: true, label: "Awarded", hint: error };
     }
     if (input.occupied) {
-      return { disabled: true, label: "Held", hint: error };
+      return { disabled: true, label: "Has a bid", hint: error };
     }
     return { disabled: true, label: input.status === "closed" ? "Closed" : "Open", hint: error };
   }
@@ -145,7 +145,7 @@ export function MeZoneBoard({ eventDate, zones }: BoardProps) {
             eventDate,
           });
           const state = zone.occupied
-            ? `${zone.leadStatus === "won" ? "Won" : "Held"}${
+            ? `${zone.leadStatus === "won" ? "Awarded" : "Leading bid"}${
                 zone.currentCents ? ` ${centsToUsd(zone.currentCents)}` : ""
               }`
             : zone.status === "closed"
@@ -278,10 +278,10 @@ function ownerHint(
   fallback: string | null,
 ) {
   if (zone.occupied && zone.leadStatus === "won") {
-    return "Won. You cannot close this zone.";
+    return "This placement is awarded. You can’t close it.";
   }
   if (zone.occupied) {
-    return "Held. You cannot close this zone.";
+    return "A brand has a bid here. You can’t close it.";
   }
   if (zone.status === "closed" && auctionClosed) {
     return "Closed. Cannot reopen after T–48h.";

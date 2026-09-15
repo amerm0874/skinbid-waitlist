@@ -126,7 +126,7 @@ export default async function RacePage({ params }: PageProps) {
             line="No athletes on this race yet."
             toEvents={isAthlete}
             href={listHref ?? "/events"}
-            linkLabel={isAthlete ? "List your race" : "Explore other races"}
+            linkLabel={isAthlete ? "List your race" : "Browse other races"}
           />
         )}
       </div>
