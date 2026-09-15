@@ -34,9 +34,19 @@ export default async function AthletesPage() {
       <div className="page-stack">
         <div className="board-intro">
           <h1 className="page-title">Meet your next athlete.</h1>
-          <p className="page-lead">Real competitors. Real race-day visibility. Find the person behind your next sponsorship.</p>
+          <p className="page-lead">
+            Find an athlete. Open their photo. Put your brand in the action.
+          </p>
         </div>
-        <div className="collection-heading"><h2>Open for sponsorship</h2><span>{athletes.length} {athletes.length === 1 ? "athlete" : "athletes"}</span></div>
+        <div className="discovery-guide" aria-label="How sponsorship works">
+          <span><b>1</b> Choose an athlete</span>
+          <span><b>2</b> Bid on a body placement</span>
+          <span><b>3</b> Pay & add your logo</span>
+        </div>
+        <div className="collection-heading">
+          <h2>Open for sponsorship</h2>
+          <span>{athletes.length} {athletes.length === 1 ? "athlete" : "athletes"}</span>
+        </div>
         {athletes.length > 0 ? (
           <ul className="live-body-list">
             {athletes.map((card, index) => (
